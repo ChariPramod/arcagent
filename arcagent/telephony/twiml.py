@@ -9,11 +9,18 @@ from __future__ import annotations
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
 
-def connect_stream(stream_url: str) -> str:
-    """Answer an inbound call by opening a bidirectional media stream to ``stream_url``."""
+def connect_stream(stream_url: str, parameters: dict[str, str] | None = None) -> str:
+    """Answer an inbound call by opening a bidirectional media stream to ``stream_url``.
+
+    ``parameters`` become ``<Parameter>`` children and arrive back as ``customParameters``
+    on the ``start`` event. This is how the call sid and the caller's number reach the
+    WebSocket handler, which never sees the original webhook request.
+    """
     response = VoiceResponse()
     connect = Connect()
-    connect.stream(url=stream_url)
+    stream = connect.stream(url=stream_url)
+    for name, value in (parameters or {}).items():
+        stream.parameter(name=name, value=value)
     response.append(connect)
     return str(response)
 

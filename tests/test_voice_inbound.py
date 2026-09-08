@@ -91,12 +91,12 @@ class TestInboundWebhook:
             app.dependency_overrides.clear()
 
 
-class TestStreamRoute:
+class TestEchoRoute:
     """The real ASGI WebSocket route, not the fake socket."""
 
     def test_media_frames_are_echoed_over_the_real_route(self, client: TestClient) -> None:
         payload = bytes([0xFF, 0x7E]) * 80
-        with client.websocket_connect("/voice/stream") as ws:
+        with client.websocket_connect("/voice/echo") as ws:
             ws.send_json(connected_message())
             ws.send_json(start_message())
             ws.send_json(media_message(payload))
@@ -106,6 +106,27 @@ class TestStreamRoute:
         assert base64.b64decode(echoed["media"]["payload"]) == payload
 
     def test_client_hangup_closes_the_session_cleanly(self, client: TestClient) -> None:
-        with client.websocket_connect("/voice/stream") as ws:
+        with client.websocket_connect("/voice/echo") as ws:
             ws.send_json(start_message())
             ws.close()
+
+
+class TestStreamParameters:
+    """The call sid and caller number ride to the WebSocket as stream parameters."""
+
+    def test_twiml_carries_the_call_identifiers(self) -> None:
+        xml = connect_stream(
+            "wss://example.test/voice/stream", {"call_sid": "CA_x", "from": "+15550001111"}
+        )
+        assert '<Parameter name="call_sid" value="CA_x" />' in xml
+        assert '<Parameter name="from" value="+15550001111" />' in xml
+
+    def test_no_parameters_produces_a_bare_stream(self) -> None:
+        assert "<Parameter" not in connect_stream("wss://example.test/voice/stream")
+
+    def test_the_webhook_forwards_what_twilio_posted(self, client: TestClient) -> None:
+        url = f"{PUBLIC_URL}/voice/inbound"
+        params = {"CallSid": "CA_forwarded", "From": "+15551234567"}
+        response = client.post("/voice/inbound", data=params, headers=_signed_headers(url, params))
+        assert 'name="call_sid" value="CA_forwarded"' in response.text
+        assert 'name="from" value="+15551234567"' in response.text
