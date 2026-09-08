@@ -7,14 +7,18 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Form, Response, WebSocket
 
 from arcagent import __version__
+from arcagent.agent.graph import AgentConfig
+from arcagent.agent.llm import AnthropicStructuredLLM
+from arcagent.agent.responder import GraphResponder
 from arcagent.config import Settings, get_settings
 from arcagent.logging import configure_logging, get_logger
 from arcagent.persistence.models import Outcome
 from arcagent.speech.cartesia_tts import CartesiaTTS
 from arcagent.speech.deepgram_stt import DeepgramSTT
-from arcagent.telephony.availability import get_availability
-from arcagent.telephony.call_session import CallSession, ParrotResponder
+from arcagent.telephony.availability import CoordinatorAvailability, get_availability
+from arcagent.telephony.call_session import CallSession
 from arcagent.telephony.persistence_sink import DatabaseTurnSink
+from arcagent.telephony.routing import CallRouter
 from arcagent.telephony.security import validate_twilio_request
 from arcagent.telephony.session_handler import TwilioWebSocket, run_echo_session
 from arcagent.telephony.twiml import connect_stream
@@ -75,35 +79,83 @@ async def set_coordinator(
 
 @app.websocket("/voice/stream")
 async def voice_stream(websocket: WebSocket) -> None:
-    """Twilio media stream: STT, agent, TTS.
-
-    The responder is the parrot until the LangGraph agent lands in T9.
-    """
+    """Twilio media stream: STT, the LangGraph agent, TTS, then routing."""
     await websocket.accept()
     settings = get_settings()
-    socket = TwilioWebSocket(websocket)
+    availability = get_availability(settings.coordinator_available)
 
     stt = DeepgramSTT(settings)
     tts = CartesiaTTS(settings)
     sink = DatabaseTurnSink()
+    responder = GraphResponder(
+        AgentConfig(
+            llm=AnthropicStructuredLLM(settings),
+            prompt_version=settings.prompt_version,
+            threshold=settings.handoff_threshold,
+            coordinator_available=availability.available,
+        )
+    )
 
     await stt.start()
     await tts.start()
     session = CallSession(
-        socket=socket,
+        socket=TwilioWebSocket(websocket),
         stt=stt,
         tts=tts,
-        responder=ParrotResponder(),
+        responder=responder,
         settings=settings,
         turn_sink=sink,
         on_start=sink.open,
     )
     try:
         await session.run()
+        await _finish_call(settings, session, responder, sink, availability)
     finally:
-        await sink.close(Outcome.ABANDONED, final_node=session.responder.node_name)
         await stt.close()
         await tts.close()
+
+
+async def _finish_call(
+    settings: Settings,
+    session: CallSession,
+    responder: GraphResponder,
+    sink: DatabaseTurnSink,
+    availability: CoordinatorAvailability,
+) -> None:
+    """Score, persist and route once the caller is done talking.
+
+    A caller who was never a lead, a wrong number or an existing patient, gets no lead row
+    and no score. Creating one would put a record in the CRM that a coordinator has to
+    read and discard.
+    """
+    outcome = session.outcome or responder.outcome
+    if session.language_fallback:
+        await sink.close(Outcome.LANGUAGE_FALLBACK, final_node="language_fallback")
+        log.info("call_ended", outcome="language_fallback", dtmf_digits=len(session.dtmf_digits))
+        return
+
+    if not responder.creates_a_lead or sink.call_id is None:
+        await sink.close(Outcome(outcome or "abandoned"), final_node=responder.node_name)
+        log.info("call_ended", outcome=outcome)
+        return
+
+    router = CallRouter(
+        settings.model_copy(update={"coordinator_available": availability.available})
+    )
+    result = await router.finish_call(
+        call_id=sink.call_id,
+        twilio_call_sid=sink.twilio_call_sid,
+        fields=responder.fields,
+        consent_turn_index=sink.turn_index,
+    )
+    await sink.close(result.outcome, final_node=responder.node_name)
+    log.info(
+        "call_ended",
+        outcome=str(result.outcome),
+        score=result.score.score,
+        decision=str(result.score.decision),
+        routing_error=result.error,
+    )
 
 
 @app.websocket("/voice/echo")

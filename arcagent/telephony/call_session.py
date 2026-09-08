@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from arcagent.agent.edge_cases import SILENCE_GOODBYE, SILENCE_REPROMPT, SPANISH_FALLBACK
 from arcagent.config import Settings
 from arcagent.logging import get_logger
 from arcagent.speech.cartesia_tts import CartesiaTTS
@@ -44,6 +45,19 @@ log = get_logger(__name__)
 # How often the silence watchdog wakes. Small enough to be responsive, large enough not
 # to spin. Injectable as `sleep` so tests can drive it with a fake clock.
 SILENCE_POLL_S = 0.25
+
+# Queued instead of a caller transcript when the session, rather than the caller, is what
+# prompts the agent to speak. Compared by identity, never by value, so a caller saying the
+# same words cannot trigger one. Each maps to a line spoken verbatim.
+_FALLBACK_SENTINEL = "\x00language-fallback"
+_REPROMPT_SENTINEL = "\x00silence-reprompt"
+_GOODBYE_SENTINEL = "\x00silence-goodbye"
+
+FIXED_LINES = {
+    _FALLBACK_SENTINEL: SPANISH_FALLBACK,
+    _REPROMPT_SENTINEL: SILENCE_REPROMPT,
+    _GOODBYE_SENTINEL: SILENCE_GOODBYE,
+}
 
 
 class SessionState(enum.StrEnum):
@@ -149,6 +163,13 @@ class CallSession:
         self._last_caller_activity = self.clock()
         self._done = asyncio.Event()
 
+        # Spanish fallback: after the fixed message the caller keys their number, so the
+        # session collects DTMF instead of transcripts until they press hash.
+        self.dtmf_digits: list[str] = []
+        self.awaiting_dtmf = False
+        self.language_fallback = False
+        self.outcome: str | None = None
+
     # ------------------------------------------------------------------ run
 
     async def run(self) -> None:
@@ -201,6 +222,9 @@ class CallSession:
                             await self.on_start(event)
                         except Exception:
                             log.exception("on_start_failed", call_sid=event.call_sid)
+                    # An empty transcript is the signal to greet. The caller has not
+                    # spoken yet and must not have to before hearing the disclosure.
+                    self._caller_turns.put_nowait(("", TurnTimings(clock=self.clock)))
                 case MediaEvent():
                     self.stream.on_media(event)
                     self._pending_timings.mark_audio_frame()
@@ -213,6 +237,16 @@ class CallSession:
                         self._last_caller_activity = self.clock()
                 case DtmfEvent():
                     log.info("dtmf", digit=event.digit)
+                    if self.awaiting_dtmf:
+                        if event.digit == "#":
+                            log.info(
+                                "dtmf_capture_complete",
+                                call_sid=self.stream.call_sid,
+                                digit_count=len(self.dtmf_digits),
+                            )
+                            self.end()
+                            return
+                        self.dtmf_digits.append(event.digit)
                 case StopEvent():
                     self.stream.on_stop(event)
                     self.end()
@@ -239,6 +273,11 @@ class CallSession:
             return
         self._last_caller_activity = self.clock()
 
+        if event.is_final and await self._check_language(event):
+            return
+        if self.awaiting_dtmf:
+            return  # the caller is keying a number, not talking to the agent
+
         if self.state is SessionState.SPEAKING and self._should_barge_in(event):
             await self._barge_in()
 
@@ -248,6 +287,25 @@ class CallSession:
             self._pending_timings = TurnTimings(clock=self.clock)
             await self._record_turn(TurnRecord(speaker="caller", text=event.text))
             self._caller_turns.put_nowait((event.text, timings))
+
+    async def _check_language(self, event: TranscriptEvent) -> bool:
+        """Fall back to a Spanish callback when the caller is clearly not speaking English.
+
+        The fixed message is spoken rather than generated, so it is identical every time,
+        and the callback number arrives as keypad tones because the STT session is
+        configured for English and would mis-transcribe spoken Spanish digits.
+        """
+        observe = getattr(self.responder, "observe_language", None)
+        if observe is None or not event.language or not observe(event.language):
+            return False
+
+        self.language_fallback = True
+        self.awaiting_dtmf = True
+        log.info("language_fallback", call_sid=self.stream.call_sid)
+        if self.state is SessionState.SPEAKING:
+            await self._barge_in()
+        self._caller_turns.put_nowait((_FALLBACK_SENTINEL, TurnTimings(clock=self.clock)))
+        return True
 
     def _should_barge_in(self, event: TranscriptEvent) -> bool:
         """A final always interrupts. An interim only if it is more than a backchannel."""
@@ -333,6 +391,18 @@ class CallSession:
                 return
 
     async def _speak_reply(self, transcript: str, timings: TurnTimings) -> None:
+        for sentinel, line in FIXED_LINES.items():
+            if transcript is sentinel:
+                try:
+                    await self._speak(line, timings)
+                finally:
+                    # The goodbye ends the call, but only after it has been said. Ending
+                    # from the silence watchdog instead cancels the writer before a single
+                    # frame reaches Twilio. The finally is deliberate: a failure to
+                    # synthesise must not leave a silent call open forever.
+                    if transcript is _GOODBYE_SENTINEL:
+                        self.end()
+                return
         timings.mark_llm_start()
         async for text in self.responder.respond(transcript):
             timings.mark_llm_first_token()
@@ -409,12 +479,14 @@ class CallSession:
             idle = self.clock() - self._last_caller_activity
             if idle >= self.settings.silence_hangup_s:
                 log.info("silence_hangup", call_sid=self.stream.call_sid, idle_s=round(idle, 1))
-                self.end()
+                self.outcome = "abandoned"
+                self._caller_turns.put_nowait((_GOODBYE_SENTINEL, TurnTimings(clock=self.clock)))
+                # The agent loop ends the call once the goodbye has actually been spoken.
                 return
             if idle >= self.settings.silence_reprompt_s and not self.reprompted:
                 self.reprompted = True
                 self._last_caller_activity = self.clock()
-                self._caller_turns.put_nowait(("", TurnTimings(clock=self.clock)))
+                self._caller_turns.put_nowait((_REPROMPT_SENTINEL, TurnTimings(clock=self.clock)))
 
     # ------------------------------------------------------------ turn sink
 

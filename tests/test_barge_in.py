@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+from arcagent.agent.edge_cases import SILENCE_GOODBYE, SILENCE_REPROMPT
 from arcagent.config import Settings
 from arcagent.telephony.call_session import SessionState
 from tests.fakes import dg_results, media_message
@@ -212,7 +213,7 @@ class TestSilence:
         await harness.stop()
 
         assert harness.session.reprompted
-        assert harness.tts_socket.requests[0]["transcript"] == "are you still there"
+        assert harness.tts_socket.requests[0]["transcript"] == SILENCE_REPROMPT
 
     async def test_the_reprompt_happens_only_once(self) -> None:
         clock = FakeClock()
@@ -242,6 +243,7 @@ class TestSilence:
             lambda: harness.session.state is SessionState.ENDING, rounds=2000
         )
         await harness.stop()
+        assert harness.session.outcome == "abandoned"
 
     async def test_caller_speech_resets_the_silence_timer(self) -> None:
         clock = FakeClock()
@@ -323,3 +325,31 @@ class TestShutdown:
         await harness.start()
         await harness.stop()
         assert harness.session.state is SessionState.ENDING
+
+
+class TestSilenceLines:
+    """The lines the session speaks when the caller, not the agent, has gone quiet."""
+
+    async def test_the_goodbye_is_spoken_before_the_call_ends(self) -> None:
+        clock = FakeClock()
+        harness = build_harness(
+            ScriptedResponder(),
+            settings=settings(silence_reprompt_s=600, silence_hangup_s=15),
+            clock=clock,
+        )
+        await harness.start()
+        clock.advance(16)
+        assert await harness.wait_until(lambda: harness.tts_socket.requests != [], rounds=2000)
+        await harness.stop()
+        assert harness.tts_socket.requests[0]["transcript"] == SILENCE_GOODBYE
+
+    async def test_a_caller_saying_the_sentinel_text_does_not_trigger_it(self) -> None:
+        """The sentinels are compared by identity, so they are not sayable."""
+        from arcagent.telephony.call_session import FIXED_LINES
+
+        harness = build_harness(ScriptedResponder(["ok"]), tts_auto=True)
+        await harness.start()
+        await harness.caller_says(next(iter(FIXED_LINES)))
+        assert await harness.wait_until(lambda: harness.tts_socket.requests != [])
+        await harness.stop()
+        assert harness.tts_socket.requests[0]["transcript"] == "ok"

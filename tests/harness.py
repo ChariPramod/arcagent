@@ -29,6 +29,8 @@ class ScriptedResponder:
         self.should_end = False
 
     async def respond(self, transcript: str) -> AsyncIterator[str]:
+        if not transcript:
+            return  # the greeting turn; a scripted responder has nothing to greet with
         self.heard.append(transcript)
         yield self.replies.pop(0) if self.replies else "acknowledged"
 
