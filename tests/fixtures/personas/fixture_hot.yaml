@@ -1,0 +1,20 @@
+id: fixture_hot
+group: hot_buyers
+description: Harness fixture. Not a real persona.
+background: |
+  Test fixture. Wants a full arch, is in pain, has insurance through an employer.
+behaviour:
+  terse: true
+  withholds:
+    - employer_name
+objections: []
+callback_response: accepts
+expected:
+  outcome: handoff
+  handoff: true
+  fields:
+    treatment_interest: full_arch
+    pain_level: 8
+    has_insurance: true
+  not_expected:
+    - plan_type

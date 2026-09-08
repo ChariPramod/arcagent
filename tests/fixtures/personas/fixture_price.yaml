@@ -1,0 +1,19 @@
+id: fixture_price
+group: price_objectors
+description: Harness fixture. Not a real persona.
+background: |
+  Test fixture. Asks the price immediately and does not let it go.
+behaviour:
+  terse: true
+  volunteers:
+    - price question
+objections:
+  - kind: price
+    after_turn: 1
+    recovers_on: never
+callback_response: declines
+expected:
+  outcome: callback_booked
+  handoff: false
+  fields:
+    treatment_interest: single_implant

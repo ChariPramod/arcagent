@@ -1,0 +1,43 @@
+# Template. Copy, rename to <id>.yaml, fill in. Not loaded by the harness: files whose
+# name starts with an underscore are skipped.
+
+id: example_persona
+group: hot_buyers          # hot_buyers | price_objectors | fear_hesitation | logistics | adversarial
+description: One line, so a failing scenario is readable in the results table.
+
+# Who is calling. This is the whole prompt the simulator gets about the person, so it
+# should read like a note about a real caller, not a spec.
+background: |
+  58 years old. Lost most of the upper teeth over the last decade and has been wearing a
+  partial that no longer fits. Saw the ad on Facebook. Embarrassed about it and does not
+  want to explain the history to a stranger.
+
+# How they talk. This is what stops the eval from being too easy.
+behaviour:
+  terse: true              # short answers, rarely a full sentence
+  volunteers: []           # things they say unprompted, before being asked
+  withholds:               # things they only give up if asked a second time
+    - employer_name
+  contradicts: false       # changes their story mid call
+
+# Objections they raise, and what it takes to move past them.
+objections:
+  - kind: price            # price | fear | just_looking | spouse | bad_experience
+    after_turn: 2
+    recovers_on: financing # financing | acknowledgement | never
+
+callback_response: accepts # accepts | declines | asks_later
+
+# What a correct run looks like. The harness compares against exactly this.
+expected:
+  outcome: handoff         # handoff | callback_booked | wrong_number | language_fallback | abandoned | not_a_lead
+  handoff: true
+  fields:
+    treatment_interest: full_arch
+    pain_level: 7
+    has_insurance: true
+    employer_name: Acme Logistics
+  # Fields the agent is not expected to get. Listing them here is honest about what the
+  # caller never said, rather than counting them as extraction failures.
+  not_expected:
+    - plan_type

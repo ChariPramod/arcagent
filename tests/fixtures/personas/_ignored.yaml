@@ -1,0 +1,7 @@
+id: ignored
+group: hot_buyers
+description: Files starting with an underscore are skipped by the loader.
+background: |
+  If this is loaded, the underscore rule is broken and the template would be run as a scenario.
+expected:
+  outcome: handoff
