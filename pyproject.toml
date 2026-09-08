@@ -1,0 +1,62 @@
+[project]
+name = "arcagent"
+version = "0.1.0"
+description = "Inbound voice agent for dental implant lead qualification"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "websockets>=13.0",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "structlog>=24.4",
+    "python-dotenv>=1.0",
+    "twilio>=9.3",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+agent = [
+    "langgraph>=0.2.50",
+    "langchain-core>=0.3.20",
+    "anthropic>=0.40",
+]
+dashboard = [
+    "streamlit>=1.40",
+    "pandas>=2.2",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["arcagent"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
