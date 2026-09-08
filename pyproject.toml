@@ -37,6 +37,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
+    "pytest-timeout>=2.3",
 ]
 
 [build-system]
@@ -60,4 +61,5 @@ ignore = ["B008"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+timeout = 30
 filterwarnings = ["ignore::DeprecationWarning"]
