@@ -40,8 +40,8 @@ class Settings(BaseSettings):
 
     # LLM
     llm_api_key: str = ""
-    llm_model: str = "claude-haiku-4-5-20251001"
-    llm_model_extraction: str = "claude-sonnet-5"
+    llm_model: str = "claude-haiku-4-5"
+    llm_model_extraction: str = "claude-opus-5"
 
     # Infrastructure
     database_url: str = "postgresql+psycopg://arcagent:arcagent@localhost:5432/arcagent"
