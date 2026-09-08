@@ -12,6 +12,7 @@ from arcagent.logging import configure_logging, get_logger
 from arcagent.persistence.models import Outcome
 from arcagent.speech.cartesia_tts import CartesiaTTS
 from arcagent.speech.deepgram_stt import DeepgramSTT
+from arcagent.telephony.availability import get_availability
 from arcagent.telephony.call_session import CallSession, ParrotResponder
 from arcagent.telephony.persistence_sink import DatabaseTurnSink
 from arcagent.telephony.security import validate_twilio_request
@@ -53,6 +54,23 @@ async def voice_inbound(
     twiml = connect_stream(settings.stream_url, {"call_sid": CallSid, "from": From})
     log.info("inbound_call_answered", stream_url=settings.stream_url, call_sid=CallSid)
     return Response(content=twiml, media_type="application/xml")
+
+
+@app.get("/admin/coordinator")
+async def get_coordinator(settings: Settings = Depends(get_settings)) -> dict[str, bool]:
+    """Whether a warm transfer would be accepted right now."""
+    return {"available": get_availability(settings.coordinator_available).available}
+
+
+@app.post("/admin/coordinator")
+async def set_coordinator(
+    available: bool,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, bool]:
+    """Flip the flag. A hot lead scored above the threshold still books a callback when
+    this is false, because a transfer nobody answers is worse than a booked callback."""
+    flag = get_availability(settings.coordinator_available)
+    return {"available": flag.set(available)}
 
 
 @app.websocket("/voice/stream")
