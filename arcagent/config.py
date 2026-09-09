@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://arcagent:arcagent@localhost:5432/arcagent"
     public_url: str = ""
 
+    # Server-to-server credential for the read-only product console.
+    console_api_token: str = Field(default="", repr=False)
+
     # Conversation behaviour
     prompt_version: str = "v1"
     handoff_threshold: int = 60
