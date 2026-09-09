@@ -14,15 +14,18 @@ average looks like it saves.
 from __future__ import annotations
 
 import argparse
+import math
 import sys
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 from arcagent.logging import configure_logging
 from arcagent.persistence.db import session_scope
-from arcagent.persistence.models import EvalResult, EvalRun
+from arcagent.persistence.models import EvalResult, EvalRun, Tier
 from arcagent.persistence.repo import EvalRepository
 from evals import metrics
+from evals.snapshots import RunSnapshot
 
 # Metrics that must not go down, per group. The first is the merge rule.
 REGRESSION_GUARDS: dict[str, tuple[str, ...]] = {
@@ -65,7 +68,16 @@ def _by_group(results: Sequence[EvalResult], groups: dict[str, str]) -> dict[str
 
 def _metrics_for(rows: Sequence[EvalResult]) -> dict[str, float]:
     if not rows:
-        return {"pass_rate": 0.0, "field_accuracy": 0.0, "handoff_recall": 0.0}
+        return dict.fromkeys(
+            (
+                "pass_rate",
+                "field_accuracy",
+                "handoff_recall",
+                "handoff_precision",
+                "crm_completeness",
+            ),
+            0.0,
+        )
     counts = metrics.handoff_counts(
         [(bool(r.handoff_expected), bool(r.handoff_actual)) for r in rows]
     )
@@ -78,22 +90,99 @@ def _metrics_for(rows: Sequence[EvalResult]) -> dict[str, float]:
     }
 
 
-def scenario_groups(results: Sequence[EvalResult]) -> dict[str, str]:
-    """Scenario id to group, read from the personas on disk.
+class InvalidComparison(ValueError):
+    """The runs do not contain sufficient comparable evidence for a merge verdict."""
 
-    Falls back to unknown rather than guessing, so a persona renamed between runs shows up
-    as unknown instead of quietly landing in the wrong category.
-    """
-    from evals.persona import PersonaError, load_personas
 
+def validate_run(run: EvalRun, rows: Sequence[EvalResult]) -> RunSnapshot:
+    """Check planned coverage, provenance and measurements before computing any deltas."""
+    if run.tier != Tier.TEXT:
+        raise InvalidComparison(f"run {run.id}: only text runs have qualification evidence")
+    if run.snapshot is None:
+        raise InvalidComparison(f"run {run.id}: missing input snapshot; rerun the evaluation")
     try:
-        return {p.id: str(p.group) for p in load_personas()}
-    except PersonaError:
-        return {}
+        snapshot = RunSnapshot.model_validate(run.snapshot)
+    except ValueError as exc:
+        raise InvalidComparison(f"run {run.id}: malformed input snapshot") from exc
+    if (
+        run.prompt_version != snapshot.config.prompt_version
+        or run.threshold != snapshot.config.threshold
+    ):
+        raise InvalidComparison(f"run {run.id}: run metadata disagrees with its snapshot")
+    planned = Counter(
+        {
+            (scenario, repeat): 1
+            for scenario in snapshot.personas
+            for repeat in range(snapshot.config.repeats)
+        }
+    )
+    observed = Counter((row.scenario_id, row.repeat_index) for row in rows)
+    if planned != observed:
+        raise InvalidComparison(
+            f"run {run.id}: incomplete or duplicate scenario/repeat coverage "
+            f"(expected {sum(planned.values())}, recorded {sum(observed.values())})"
+        )
+    for row in rows:
+        expected = snapshot.personas[row.scenario_id].expected
+        if row.expected != expected.fields or row.handoff_expected != expected.handoff:
+            raise InvalidComparison(f"run {run.id}: recorded expectations disagree with snapshot")
+        if row.notes:
+            raise InvalidComparison(
+                f"run {run.id}: scenario errors must be resolved before comparison"
+            )
+        if any(
+            type(value) is not bool
+            for value in (row.passed, row.handoff_expected, row.handoff_actual)
+        ):
+            raise InvalidComparison(f"run {run.id}: missing verdict or handoff measurement")
+        for name in ("field_accuracy", "crm_completeness"):
+            value = getattr(row, name)
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                or not 0 <= value <= 1
+            ):
+                raise InvalidComparison(f"run {run.id}: missing or invalid {name}")
+    required_groups = {group for groups in REGRESSION_GUARDS.values() for group in groups}
+    missing = required_groups - set(snapshot.groups.values())
+    if missing:
+        raise InvalidComparison(
+            f"run {run.id}: missing guarded categories: {', '.join(sorted(missing))}"
+        )
+    for group in REGRESSION_GUARDS.get("handoff_recall", ()):
+        if not any(
+            p.expected.handoff and str(p.group) == group for p in snapshot.personas.values()
+        ):
+            raise InvalidComparison(
+                f"run {run.id}: no expected handoffs in guarded category {group}"
+            )
+    return snapshot
+
+
+def comparison_groups(
+    old_run: EvalRun,
+    new_run: EvalRun,
+    old_rows: Sequence[EvalResult],
+    new_rows: Sequence[EvalResult],
+) -> dict[str, str]:
+    before, after = validate_run(old_run, old_rows), validate_run(new_run, new_rows)
+    if before.suite != after.suite:
+        raise InvalidComparison(
+            "suite changed; fixture mutations cannot be compared with owner personas"
+        )
+    if before.personas != after.personas or before.caller_scripts != after.caller_scripts:
+        raise InvalidComparison("persona content, expectations, or caller scripts changed")
+    if before.caller_prompt != after.caller_prompt:
+        raise InvalidComparison("caller instructions changed")
+    for name in ("caller_model", "max_turns", "repeats", "coordinator_available"):
+        if getattr(before.config, name) != getattr(after.config, name):
+            raise InvalidComparison(f"benchmark configuration changed: {name}")
+    return before.groups
 
 
 def compare(old_id: int, new_id: int) -> int:
-    """Print the comparison. Returns the process exit code."""
+    """Exit codes: zero for no regression, one for regression, two for invalid evidence."""
     with session_scope() as session:
         repo = EvalRepository(session)
         old_run, new_run = repo.get_run(old_id), repo.get_run(new_id)
@@ -105,7 +194,21 @@ def compare(old_id: int, new_id: int) -> int:
         new_rows = repo.results_for(new_id)
         _print_header(old_run, new_run)
 
-        groups = scenario_groups(old_rows + new_rows)
+        try:
+            groups = comparison_groups(old_run, new_run, old_rows, new_rows)
+        except InvalidComparison as exc:
+            print(f"\nCOMPARISON INVALID: {exc}")
+            return 2
+        print(f"  suite={old_run.snapshot['suite']}")
+        old_config, new_config = old_run.snapshot["config"], new_run.snapshot["config"]
+        changes = [name for name in old_config if old_config[name] != new_config[name]]
+        print(f"  changed configuration: {', '.join(sorted(changes)) or 'none'}")
+        changed_prompts = [
+            name
+            for name, value in old_run.snapshot["prompts"].items()
+            if value["sha256"] != new_run.snapshot["prompts"][name]["sha256"]
+        ]
+        print(f"  changed prompts: {', '.join(sorted(changed_prompts)) or 'none'}")
         print("\noverall:")
         overall_before, overall_after = _metrics_for(old_rows), _metrics_for(new_rows)
         for name in sorted(overall_before):
@@ -162,7 +265,7 @@ def _print_scenario_changes(old_rows, new_rows) -> None:
         return {k: all(v) for k, v in by_scenario.items()}
 
     before, after = verdict(old_rows), verdict(new_rows)
-    fixed = sorted(s for s in after if after[s] and not before.get(s, False))
+    fixed = sorted(s for s in set(before) & set(after) if after[s] and not before[s])
     broken = sorted(s for s in after if not after[s] and before.get(s, False))
     added = sorted(set(after) - set(before))
     removed = sorted(set(before) - set(after))

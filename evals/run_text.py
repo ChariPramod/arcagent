@@ -20,6 +20,7 @@ from arcagent.persistence.models import Tier
 from arcagent.persistence.repo import EvalRepository
 from evals.persona import PersonaError, load_personas
 from evals.runner import ScenarioResult, format_summary, git_sha, run_scenario, summarise
+from evals.snapshots import RunSnapshot, capture_snapshot
 
 log = get_logger(__name__)
 
@@ -45,6 +46,8 @@ def parse_args() -> argparse.Namespace:
 
 async def run(args: argparse.Namespace) -> int:
     settings = get_settings()
+    if args.repeats < 1 or args.concurrency < 1:
+        raise SystemExit("repeats and concurrency must be positive")
     if not settings.llm_api_key:
         raise SystemExit("LLM_API_KEY is not set. Put it in .env.")
 
@@ -61,6 +64,17 @@ async def run(args: argparse.Namespace) -> int:
     agent_llm = AnthropicStructuredLLM(settings)
     caller_llm = AnthropicStructuredLLM(settings)
     caller_model = args.caller_model or settings.llm_model_extraction
+    snapshot = await asyncio.to_thread(
+        capture_snapshot,
+        personas,
+        settings,
+        prompt_version=args.prompts,
+        threshold=args.threshold,
+        repeats=args.repeats,
+        concurrency=args.concurrency,
+        caller_model=caller_model,
+    )
+    sha = git_sha()
 
     semaphore = asyncio.Semaphore(args.concurrency)
 
@@ -72,6 +86,7 @@ async def run(args: argparse.Namespace) -> int:
                 caller_llm=caller_llm,
                 prompt_version=args.prompts,
                 threshold=args.threshold,
+                coordinator_available=settings.coordinator_available,
                 repeat_index=repeat,
                 caller_model=caller_model,
             )
@@ -88,12 +103,17 @@ async def run(args: argparse.Namespace) -> int:
     summary = summarise(results, args.repeats)
     run_id = None
     if not args.no_db:
-        run_id = write_results(args, results, sha=git_sha())
+        run_id = write_results(args, results, sha=sha, snapshot=snapshot)
     print(format_summary(summary, args.run_name, run_id))
     return run_id or 0
 
 
-def write_results(args: argparse.Namespace, results, sha: str) -> int:
+def write_results(
+    args: argparse.Namespace,
+    results,
+    sha: str,
+    snapshot: RunSnapshot | None = None,
+) -> int:
     """Persist the run and every scenario result. The results table is generated from this."""
     with session_scope() as session:
         repo = EvalRepository(session)
@@ -103,6 +123,7 @@ def write_results(args: argparse.Namespace, results, sha: str) -> int:
             prompt_version=args.prompts,
             threshold=args.threshold,
             tier=Tier.TEXT,
+            snapshot=snapshot.model_dump(mode="json") if snapshot else None,
         )
         for result in results:
             repo.add_result(
@@ -111,6 +132,9 @@ def write_results(args: argparse.Namespace, results, sha: str) -> int:
                 repeat_index=result.repeat_index,
                 expected=result.expected,
                 actual=result.actual,
+                transcript=[
+                    {"speaker": speaker, "text": text} for speaker, text in result.transcript
+                ],
                 passed=result.passed,
                 field_accuracy=result.field_accuracy,
                 handoff_expected=result.handoff_expected,

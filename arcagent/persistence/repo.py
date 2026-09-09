@@ -191,6 +191,7 @@ class EvalRepository:
         prompt_version: str,
         threshold: int,
         tier: Tier | str,
+        snapshot: dict | None = None,
     ) -> EvalRun:
         run = EvalRun(
             run_name=run_name,
@@ -198,6 +199,7 @@ class EvalRepository:
             prompt_version=prompt_version,
             threshold=threshold,
             tier=Tier(tier),
+            snapshot=snapshot,
             created_at=_now(),
         )
         self.session.add(run)

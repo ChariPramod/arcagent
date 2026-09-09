@@ -92,6 +92,8 @@ async def run_scenario(
         agent_lines = [line async for line in responder.greet()]
         while not responder.should_end and not caller.exhausted:
             turn = await caller.reply_to(agent_lines)
+            # reply_to has already recorded these lines, including on a caller hangup.
+            agent_lines = []
             if turn.hung_up or not turn.utterance.strip():
                 break
             agent_lines = [line async for line in responder.respond(turn.utterance)]

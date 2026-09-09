@@ -20,7 +20,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv pip install --system -e ".[dev]"
+        run: uv pip install --system -e ".[dev,agent,dashboard]"
 
       - name: Lint
         run: |

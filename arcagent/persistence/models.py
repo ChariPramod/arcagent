@@ -177,6 +177,7 @@ class EvalRun(Base):
     prompt_version: Mapped[str] = mapped_column(String(16))
     threshold: Mapped[int] = mapped_column(Integer)
     tier: Mapped[Tier] = mapped_column(Enum(Tier, name="eval_tier"))
+    snapshot: Mapped[dict | None] = mapped_column(JsonCol)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     results: Mapped[list[EvalResult]] = relationship(
@@ -193,6 +194,8 @@ class EvalResult(Base):
     repeat_index: Mapped[int] = mapped_column(Integer, default=0)
     expected: Mapped[dict | None] = mapped_column(JsonCol, default=dict)
     actual: Mapped[dict | None] = mapped_column(JsonCol, default=dict)
+    # Null means not recorded (older runs and audio evals); [] means no utterances.
+    transcript: Mapped[list[dict[str, str]] | None] = mapped_column(JsonCol)
     passed: Mapped[bool] = mapped_column(Boolean, default=False)
     field_accuracy: Mapped[float | None] = mapped_column(Float)
     handoff_expected: Mapped[bool | None] = mapped_column(Boolean)

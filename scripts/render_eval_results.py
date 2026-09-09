@@ -21,6 +21,7 @@ from arcagent.persistence.db import session_scope
 from arcagent.persistence.models import EvalResult, EvalRun
 from arcagent.persistence.repo import EvalRepository
 from evals import metrics
+from evals.snapshots import saved_groups
 
 OUTPUT = Path(__file__).resolve().parents[1] / "docs" / "eval_results.md"
 
@@ -78,6 +79,7 @@ def render_run(run: EvalRun, rows: list[EvalResult], groups: dict[str, str]) -> 
         f"- prompt version: `{run.prompt_version}`",
         f"- handoff threshold: `{run.threshold}`",
         f"- tier: `{run.tier}`",
+        f"- suite: `{(getattr(run, 'snapshot', None) or {}).get('suite', 'unrecorded')}`",
         f"- run at: {run.created_at:%Y-%m-%d %H:%M} UTC" if run.created_at else "",
         f"- scenarios: {len({r.scenario_id for r in rows})}, results: {len(rows)}",
         "",
@@ -157,13 +159,6 @@ def main() -> None:
         print(f"no runs in the database. wrote the placeholder to {args.output}")
         return
 
-    from evals.persona import PersonaError, load_personas
-
-    try:
-        groups = {p.id: str(p.group) for p in load_personas()}
-    except PersonaError:
-        groups = {}
-
     with session_scope() as session:
         repo = EvalRepository(session)
         run = repo.get_run(run_id)
@@ -172,7 +167,7 @@ def main() -> None:
         rows = repo.results_for(run_id)
         if not rows:
             raise SystemExit(f"run {run_id} has no results")
-        args.output.write_text(render_run(run, rows, groups), encoding="utf-8")
+        args.output.write_text(render_run(run, rows, saved_groups(run.snapshot)), encoding="utf-8")
     print(f"wrote {args.output} from run {run_id}")
 
 

@@ -10,6 +10,7 @@ from arcagent.persistence.db import get_engine, get_session_factory
 from arcagent.persistence.models import Base, Tier
 from arcagent.persistence.repo import EvalRepository
 from evals.compare_runs import NOISE_FLOOR, REGRESSION_GUARDS, MetricDelta, _metrics_for
+from tests.test_eval_snapshots import snapshot_payload
 
 
 class Row:
@@ -52,6 +53,8 @@ class TestGroupMetrics:
             "pass_rate": 0.0,
             "field_accuracy": 0.0,
             "handoff_recall": 0.0,
+            "handoff_precision": 0.0,
+            "crm_completeness": 0.0,
         }
 
     def test_recall_falls_when_a_handoff_is_missed(self) -> None:
@@ -73,8 +76,24 @@ class TestMergeRule:
 class TestComparisonAgainstTheDatabase:
     def _run(self, session, name: str, rows: list[dict]) -> int:
         repo = EvalRepository(session)
-        run = repo.create_run(name, "sha", "v1", 60, Tier.TEXT)
+        snapshot = snapshot_payload()
+        hot = snapshot["personas"].pop("fixture_hot")
+        hot["id"] = "hot_1"
+        snapshot["personas"]["hot_1"] = hot
+        run = repo.create_run(name, "sha", "v1", 60, Tier.TEXT, snapshot=snapshot)
+        rows = [
+            *rows,
+            dict(
+                scenario_id="fixture_price",
+                passed=True,
+                field_accuracy=1.0,
+                handoff_expected=False,
+                handoff_actual=False,
+                crm_completeness=1.0,
+            ),
+        ]
         for row in rows:
+            row = dict(row, expected=snapshot["personas"][row["scenario_id"]]["expected"]["fields"])
             repo.add_result(run.id, **row)
         session.commit()
         return run.id
@@ -114,7 +133,6 @@ class TestComparisonAgainstTheDatabase:
         import evals.compare_runs as module
 
         monkeypatch.setattr(module, "session_scope", lambda *a, **k: _scope(url))
-        monkeypatch.setattr(module, "scenario_groups", lambda rows: {"hot_1": "hot_buyers"})
         assert module.compare(old_id, new_id) == 1
 
     def test_an_improvement_exits_zero(self, tmp_path: Path, monkeypatch) -> None:
@@ -156,7 +174,6 @@ class TestComparisonAgainstTheDatabase:
         import evals.compare_runs as module
 
         monkeypatch.setattr(module, "session_scope", lambda *a, **k: _scope(url))
-        monkeypatch.setattr(module, "scenario_groups", lambda rows: {"hot_1": "hot_buyers"})
         assert module.compare(old_id, new_id) == 0
 
     def test_a_missing_run_is_reported_not_crashed(self, tmp_path: Path, monkeypatch) -> None:

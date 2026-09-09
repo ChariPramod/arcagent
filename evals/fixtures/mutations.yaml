@@ -1,0 +1,44 @@
+# Synthetic robustness fixtures. These are not the owner-authored benchmark.
+- persona:
+    id: mutation_hot
+    group: hot_buyers
+    description: Synthetic full arch fixture for delivery mutations.
+    background: A synthetic caller wants full arch implants, reports pain and insurance.
+    expected:
+      outcome: handoff
+      handoff: true
+      fields:
+        treatment_interest: full_arch
+        pain_level: 8
+        has_insurance: true
+        callback_number: '2025550123'
+  utterances:
+    - I am interested in full arch implants.
+    - My pain is eight out of ten. I have considered this for two months.
+    - I have dental insurance.
+    - My name is Test Caller. Please call me at 2025550123 in the afternoon.
+  correction: I first thought a single implant, but I mean full arch implants.
+- persona:
+    id: mutation_price
+    group: price_objectors
+    description: Synthetic single implant fixture with an unrecovered price objection.
+    background: A synthetic caller wants one implant, has no insurance and objects to cost.
+    objections:
+      - kind: price
+        after_turn: 1
+        recovers_on: never
+    expected:
+      outcome: callback_booked
+      handoff: false
+      fields:
+        treatment_interest: single_implant
+        pain_level: 0
+        has_insurance: false
+        callback_number: '2025550123'
+  utterances:
+    - I am interested in a single implant.
+    - That is too expensive for me.
+    - I have no pain, zero out of ten. I have considered this for two months.
+    - I do not have dental insurance.
+    - My name is Test Caller. Please call me at 2025550123 in the afternoon.
+  correction: I first thought multiple implants, but I mean a single implant.

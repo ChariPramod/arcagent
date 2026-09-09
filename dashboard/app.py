@@ -18,6 +18,7 @@ from sqlalchemy import select
 from arcagent.persistence.db import session_scope
 from arcagent.persistence.models import Call, EvalResult, EvalRun, Turn
 from evals import metrics
+from evals.snapshots import saved_groups
 
 st.set_page_config(page_title="ArcAgent evals", layout="wide")
 
@@ -36,6 +37,7 @@ def load_runs() -> pd.DataFrame:
                     "threshold": r.threshold,
                     "git_sha": (r.git_sha or "")[:8],
                     "created_at": r.created_at,
+                    "suite": (r.snapshot or {}).get("suite", "unrecorded"),
                 }
                 for r in rows
             ]
@@ -45,6 +47,8 @@ def load_runs() -> pd.DataFrame:
 @st.cache_data(ttl=30)
 def load_results(run_id: int) -> pd.DataFrame:
     with session_scope() as session:
+        run = session.get(EvalRun, run_id)
+        groups = saved_groups(run.snapshot if run else None)
         rows = session.scalars(
             select(EvalResult).where(EvalResult.run_id == run_id).order_by(EvalResult.id)
         ).all()
@@ -52,6 +56,7 @@ def load_results(run_id: int) -> pd.DataFrame:
             [
                 {
                     "scenario_id": r.scenario_id,
+                    "group": groups.get(r.scenario_id, "unknown"),
                     "repeat": r.repeat_index,
                     "passed": bool(r.passed),
                     "field_accuracy": r.field_accuracy,
@@ -64,21 +69,12 @@ def load_results(run_id: int) -> pd.DataFrame:
                     "latency_p95_ms": r.latency_p95_ms,
                     "expected": r.expected,
                     "actual": r.actual,
+                    "transcript": r.transcript,
                     "notes": r.notes,
                 }
                 for r in rows
             ]
         )
-
-
-@st.cache_data(ttl=300)
-def persona_groups() -> dict[str, str]:
-    from evals.persona import PersonaError, load_personas
-
-    try:
-        return {p.id: str(p.group) for p in load_personas()}
-    except PersonaError:
-        return {}
 
 
 def summary_metrics(results: pd.DataFrame) -> dict[str, Any]:
@@ -139,8 +135,8 @@ def page_run_detail() -> None:
     columns[3].metric("Handoff recall", f"{summary['recall']:.3f}")
     columns[4].metric("Flaky scenarios", len(summary["flaky"]))
 
-    groups = persona_groups()
-    results["group"] = results["scenario_id"].map(groups).fillna("unknown")
+    if (results["group"] == "unknown").any():
+        st.warning("Some results have no valid input snapshot. Their categories are unknown.")
 
     st.subheader("By category")
     by_group = (
@@ -191,11 +187,22 @@ def page_scenario_drilldown(results: pd.DataFrame) -> None:
     )
     for row in rows.itertuples():
         with st.expander(f"repeat {row.repeat}: {'pass' if row.passed else 'FAIL'}"):
-            left, right = st.columns(2)
-            left.caption("expected")
-            left.json(row.expected or {})
-            right.caption("actual")
-            right.json(row.actual or {})
+            conversation, fields = st.columns(2)
+            with conversation:
+                st.caption("Transcript")
+                if row.transcript is None:
+                    st.info("No transcript was recorded for this result.")
+                elif not row.transcript:
+                    st.info("No utterances were captured for this result.")
+                else:
+                    for turn in row.transcript:
+                        st.caption(turn["speaker"].capitalize())
+                        st.text(turn["text"])
+            with fields:
+                st.caption("expected")
+                st.json(row.expected or {})
+                st.caption("actual")
+                st.json(row.actual or {})
 
 
 def page_calls() -> None:
