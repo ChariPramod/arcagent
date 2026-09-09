@@ -20,12 +20,14 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv pip install --system -e ".[dev,agent,dashboard]"
+        run: |
+          uv venv --python 3.12
+          uv pip install -e ".[dev,agent,dashboard]"
 
       - name: Lint
         run: |
-          ruff check .
-          ruff format --check .
+          .venv/bin/ruff check .
+          .venv/bin/ruff format --check .
 
       - name: Test
-        run: pytest -q
+        run: .venv/bin/pytest -q
