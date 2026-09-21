@@ -1,5 +1,8 @@
 # Reproducible text evaluations
 
+For authenticated synthetic audio transport, isolation requirements, and measurement
+limitations, see [Controlled voice testing](../VOICE_TESTING.md).
+
 Apply database migrations before writing new evaluations:
 
 ```bash

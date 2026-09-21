@@ -109,9 +109,24 @@ class TestAgainstTheRealServer:
         from arcagent.config import Settings, get_settings
         from evals.fake_twilio import FakeTwilioCall
 
-        app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
+        app.dependency_overrides[get_settings] = lambda: Settings(
+            _env_file=None,
+            echo_enabled=True,
+            twilio_auth_token="echo-fixture",
+            public_url="https://testserver",
+        )
         try:
-            with TestClient(app) as client, client.websocket_connect("/voice/echo") as ws:
+            from twilio.request_validator import RequestValidator
+
+            signature = RequestValidator("echo-fixture").compute_signature(
+                "wss://testserver/voice/echo", {}
+            )
+            with (
+                TestClient(app) as client,
+                client.websocket_connect(
+                    "/voice/echo", headers={"X-Twilio-Signature": signature}
+                ) as ws,
+            ):
                 call = FakeTwilioCall("ws://unused", realtime=False)
 
                 class Bridge:
@@ -170,3 +185,103 @@ class TestLatencyTable:
         table = format_latency([result])
         assert "stt_final_ms" in table
         assert "barge ins observed: 1" in table
+
+
+class TestIsolatedTransport:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "ws://localhost:8000/voice/stream",
+            "ws://example.com/eval/voice/stream",
+            "wss://user:password@example.com/eval/voice/stream",
+            "wss://example.com/eval/voice/stream?token=secret",
+        ],
+    )
+    def test_fake_client_refuses_live_or_unsafe_transport(self, url):
+        from evals.fake_twilio import FakeTwilioCall
+
+        with pytest.raises(ValueError, match="evaluation"):
+            FakeTwilioCall(url, auth_token="fixture")
+
+    async def test_token_is_sent_as_header_to_isolated_endpoint(self, monkeypatch):
+        from evals.fake_twilio import FakeTwilioCall
+
+        seen = []
+
+        class Socket:
+            async def send(self, raw):
+                pass
+
+            async def close(self):
+                pass
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        async def connect(url, **kwargs):
+            seen.append((url, kwargs))
+            return Socket()
+
+        monkeypatch.setattr("websockets.connect", connect)
+        async with FakeTwilioCall(
+            "wss://eval.example/eval/voice/stream", auth_token="fixture-secret"
+        ):
+            pass
+        assert seen == [
+            (
+                "wss://eval.example/eval/voice/stream",
+                {"additional_headers": {"Authorization": "Bearer fixture-secret"}},
+            )
+        ]
+
+
+class TestAudioEvaluationReadiness:
+    async def test_live_route_is_rejected_before_vendor_configuration(self, monkeypatch):
+        from argparse import Namespace
+
+        from arcagent.config import Settings
+        from evals.run_audio import run
+
+        monkeypatch.setattr("evals.run_audio.get_settings", lambda: Settings(_env_file=None))
+        with pytest.raises(SystemExit, match="isolated audio evaluation"):
+            await run(Namespace(stream_url="wss://example.com/voice/stream", n=1))
+
+    def test_latency_report_explains_what_it_cannot_measure(self):
+        report = format_latency([])
+        assert "response latency: not measured" in report
+        assert "playback_start_ms: playback acknowledgement" in report
+
+
+async def test_silent_audio_session_does_not_count_as_a_pass(tmp_path, monkeypatch):
+    from argparse import Namespace
+
+    from sqlalchemy import select
+
+    from arcagent.persistence.db import get_engine, session_scope
+    from arcagent.persistence.models import Base, EvalResult
+    from evals.run_audio import AudioScenarioResult, write_results
+
+    url = f"sqlite:///{tmp_path / 'audio.db'}"
+    Base.metadata.create_all(get_engine(url))
+    monkeypatch.setattr("evals.run_audio.session_scope", lambda: session_scope(url))
+    result = AudioScenarioResult(
+        scenario_id="silent",
+        group="hot_buyers",
+        repeat_index=0,
+        call_sid="CAfixture",
+        turns=0,
+        barge_ins=0,
+        outcome=None,
+        latency_p50_ms=None,
+        latency_p95_ms=None,
+    )
+    run_id = write_results(
+        Namespace(run_name="silent", prompts="v1", threshold=60), [result], "fixture"
+    )
+    with session_scope(url) as session:
+        row = session.scalar(select(EvalResult).where(EvalResult.run_id == run_id))
+        assert row.passed is False
+        assert row.notes == "No completed audio conversation was recorded"

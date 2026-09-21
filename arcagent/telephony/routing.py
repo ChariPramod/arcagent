@@ -11,6 +11,8 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from arcagent.agent.scoring import Decision, ScoreResult, score
 from arcagent.agent.state import LeadFields
 from arcagent.config import Settings
@@ -63,15 +65,22 @@ class CallRouter:
         fields: LeadFields,
         consent_turn_index: int | None = None,
     ) -> RoutingResult:
-        """Score, persist, route. Never raises: a failure is reported, not thrown at audio."""
+        """Score, persist, route; report database and vendor failures to the caller."""
         result = score(
             fields,
             threshold=self.settings.handoff_threshold,
             coordinator_available=self.settings.coordinator_available,
         )
-        lead_id, slot_start = await asyncio.to_thread(
-            self._persist, call_id, fields, result, consent_turn_index
-        )
+        try:
+            lead_id, slot_start = await asyncio.to_thread(
+                self._persist, call_id, fields, result, consent_turn_index
+            )
+        except SQLAlchemyError:
+            # Database exceptions may contain query parameters with caller data.
+            log.error("routing_persistence_failed", call_id=call_id)
+            return RoutingResult(
+                score=result, outcome=Outcome.ABANDONED, error="routing persistence failed"
+            )
 
         if result.decision is Decision.HANDOFF:
             return await self._transfer(twilio_call_sid, result, lead_id)
@@ -97,7 +106,7 @@ class CallRouter:
                 result.decision.value,
                 result.breakdown,
             )
-            if result.decision is Decision.HANDOFF:
+            if result.decision is Decision.HANDOFF or not fields.callback_number:
                 return lead.id, None
 
             slot = repo.next_open_slot()
@@ -143,20 +152,19 @@ class CallRouter:
         result: ScoreResult,
         slot_start: datetime | None,
     ) -> RoutingResult:
-        if slot_start is None:
-            return RoutingResult(
-                score=result,
-                outcome=Outcome.CALLBACK_BOOKED,
-                lead_id=lead_id,
-                error="no open slot",
-            )
         if not fields.callback_number:
             return RoutingResult(
                 score=result,
-                outcome=Outcome.CALLBACK_BOOKED,
+                outcome=Outcome.ABANDONED,
                 lead_id=lead_id,
-                slot_start=slot_start,
                 error="no callback number captured",
+            )
+        if slot_start is None:
+            return RoutingResult(
+                score=result,
+                outcome=Outcome.ABANDONED,
+                lead_id=lead_id,
+                error="no open slot",
             )
 
         try:
@@ -173,7 +181,18 @@ class CallRouter:
             )
 
         if lead_id is not None:
-            await asyncio.to_thread(self._record_sms, lead_id, receipt.sid, receipt.status)
+            try:
+                await asyncio.to_thread(self._record_sms, lead_id, receipt.sid, receipt.status)
+            except SQLAlchemyError:
+                log.error("sms_receipt_persistence_failed", call_id=call_id, lead_id=lead_id)
+                return RoutingResult(
+                    score=result,
+                    outcome=Outcome.CALLBACK_BOOKED,
+                    lead_id=lead_id,
+                    slot_start=slot_start,
+                    sms_sid=receipt.sid,
+                    error="SMS sent but receipt persistence failed",
+                )
         return RoutingResult(
             score=result,
             outcome=Outcome.CALLBACK_BOOKED,

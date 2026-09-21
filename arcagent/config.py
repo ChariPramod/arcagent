@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     twilio_number: str = ""
     coordinator_number: str = ""
     validate_twilio_signature: bool = True
+    echo_enabled: bool = False
+    enable_audio_evals: bool = False
+    audio_eval_token: str = Field(default="", repr=False)
 
     # Speech vendors
     deepgram_api_key: str = ""
@@ -49,6 +52,7 @@ class Settings(BaseSettings):
 
     # Server-to-server credential for the read-only product console.
     console_api_token: str = Field(default="", repr=False)
+    admin_api_token: str = Field(default="", repr=False)
 
     # Conversation behaviour
     prompt_version: str = "v1"

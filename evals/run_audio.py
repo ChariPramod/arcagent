@@ -3,7 +3,7 @@
     python -m evals.run_audio --run-name audio-baseline --groups hot_buyers --n 1
 
 Synthesises each persona utterance with Cartesia in a different voice, pushes mulaw frames
-through a fake Twilio WebSocket into the real ``/voice/stream`` handler, and answers when
+through a fake Twilio WebSocket into the isolated ``/eval/voice/stream`` handler, and answers when
 the agent's mark arrives.
 
 This is what tier 1 cannot see: STT errors, endpointing that cuts a caller off, and barge
@@ -28,14 +28,14 @@ from arcagent.persistence.models import Call, Tier, Turn
 from arcagent.persistence.repo import EvalRepository
 from arcagent.speech.cartesia_tts import CartesiaTTS
 from evals import metrics
-from evals.fake_twilio import FakeTwilioCall
+from evals.fake_twilio import FakeTwilioCall, validate_eval_url
 from evals.persona import Persona, PersonaError, load_personas
 from evals.runner import git_sha
 from evals.simulator import SimulatedCaller
 
 log = get_logger(__name__)
 
-DEFAULT_STREAM_URL = "ws://localhost:8000/voice/stream"
+DEFAULT_STREAM_URL = "ws://localhost:8000/eval/voice/stream"
 # The caller must not sound like the agent, or a listener cannot tell who is talking in a
 # recording, and neither can the person reviewing a failure.
 CALLER_VOICE_ENV = "EVAL_CALLER_VOICE_ID"
@@ -72,31 +72,61 @@ async def run_audio_scenario(
     caller_voice_id: str,
     repeat_index: int = 0,
     max_turns: int = 12,
+    auth_token: str = "",
+    agent_wait_s: float = 20.0,
+    persistence_wait_s: float = 5.0,
 ) -> AudioScenarioResult:
     """Play one persona down a real WebSocket and read the latency back from the database."""
     caller = SimulatedCaller(persona=persona, llm=caller_llm)
     error: str | None = None
 
-    async with FakeTwilioCall(stream_url, from_number="+15550000001") as call:
-        await call.start()
-        try:
+    call = FakeTwilioCall(stream_url, from_number="+15550000001", auth_token=auth_token)
+    stages: dict[str, list[int]] = {}
+    outcome: str | None = None
+    phase = "connection"
+    try:
+        async with call:
+            phase = "stream start"
+            await call.start()
+            last_agent_index = -1
             for _ in range(max_turns):
-                agent_audio = await call.wait_for_agent()
-                if not agent_audio.frames:
-                    break
-                agent_text = await latest_agent_text(call.call_sid)
-                turn = await caller.reply_to([agent_text] if agent_text else [])
+                phase = "agent audio playback"
+                agent_audio = await call.wait_for_agent(wait_s=agent_wait_s)
+                if not agent_audio.frames or agent_audio.mark_name is None:
+                    raise TimeoutError
+                phase = "agent transcript persistence"
+                last_agent_index, agent_text = await wait_for_agent_turn(
+                    call.call_sid, after_index=last_agent_index, wait_s=persistence_wait_s
+                )
+                if not agent_text.strip():
+                    raise ValueError
+                phase = "caller response"
+                turn = await caller.reply_to([agent_text])
                 if turn.hung_up or not turn.utterance.strip():
                     break
+                phase = "caller audio playback"
                 spoken = await synthesize(caller_tts, turn.utterance, caller_voice_id)
+                if not spoken:
+                    raise ValueError
                 await call.play(spoken)
-                await call.play_silence(0.4)  # let the endpointer close the turn
-        except Exception as exc:  # a live harness must report, not abort the whole run
-            error = f"{type(exc).__name__}: {exc}"
-            log.warning("audio_scenario_failed", scenario_id=persona.id, error=error)
+                await call.play_silence(0.4)
+            else:
+                phase = "conversation turn limit"
+                raise TimeoutError
+        phase = "call finalization"
+        stages, outcome = await wait_for_call_metrics(call.call_sid, wait_s=persistence_wait_s)
+    except Exception as exc:
+        # Vendor/network/database messages can contain credentials or caller content.
+        error = f"Audio evaluation failed during {phase} ({type(exc).__name__})"
+        log.warning(
+            "audio_scenario_failed",
+            scenario_id=persona.id,
+            phase=phase,
+            error_type=type(exc).__name__,
+        )
 
-    stages, outcome = await asyncio.to_thread(read_call_metrics, call.call_sid)
-    response_times = stages.get("playback_start_ms", [])
+    if error is None and (outcome is None or caller.turns_taken == 0):
+        error = "No completed audio conversation was recorded"
     return AudioScenarioResult(
         scenario_id=persona.id,
         group=str(persona.group),
@@ -105,8 +135,8 @@ async def run_audio_scenario(
         turns=caller.turns_taken,
         barge_ins=call.cleared,
         outcome=outcome,
-        latency_p50_ms=int(metrics.percentile(response_times, 50)) if response_times else None,
-        latency_p95_ms=int(metrics.percentile(response_times, 95)) if response_times else None,
+        latency_p50_ms=None,
+        latency_p95_ms=None,
         stage_latencies=stages,
         error=error,
     )
@@ -137,6 +167,39 @@ async def latest_agent_text(call_sid: str) -> str:
     return await asyncio.to_thread(read)
 
 
+async def wait_for_agent_turn(
+    call_sid: str, after_index: int = -1, wait_s: float = 5.0
+) -> tuple[int, str]:
+    """Wait for the next acknowledged agent turn to commit, without reusing old text.
+
+    Mark acknowledgement crosses a WebSocket before the server writes the turn. Read
+    the earliest unseen turn so multiple utterances cannot skip over one another.
+    """
+
+    def read() -> tuple[int, str] | None:
+        with session_scope() as session:
+            turn = session.scalar(
+                select(Turn)
+                .join(Call, Turn.call_id == Call.id)
+                .where(
+                    Call.twilio_call_sid == call_sid,
+                    Turn.speaker == "agent",
+                    Turn.turn_index > after_index,
+                    Turn.interrupted.is_(False),
+                )
+                .order_by(Turn.turn_index)
+                .limit(1)
+            )
+            return (turn.turn_index, turn.text) if turn is not None else None
+
+    async with asyncio.timeout(wait_s):
+        while True:
+            turn = await asyncio.to_thread(read)
+            if turn is not None:
+                return turn
+            await asyncio.sleep(0.02)
+
+
 def read_call_metrics(call_sid: str) -> tuple[dict[str, list[int]], str | None]:
     """Per stage latencies and the outcome, straight from the turns the server wrote."""
     stages: dict[str, list[int]] = {
@@ -154,7 +217,19 @@ def read_call_metrics(call_sid: str) -> tuple[dict[str, list[int]], str | None]:
                 value = getattr(turn, stage)
                 if value is not None:
                     stages[stage].append(value)
-        return stages, str(call.outcome) if call.outcome else None
+        return stages, str(call.outcome) if call.outcome and call.ended_at else None
+
+
+async def wait_for_call_metrics(
+    call_sid: str, wait_s: float = 5.0
+) -> tuple[dict[str, list[int]], str]:
+    """Wait for server finalization after the WebSocket close handshake."""
+    async with asyncio.timeout(wait_s):
+        while True:
+            stages, outcome = await asyncio.to_thread(read_call_metrics, call_sid)
+            if outcome is not None:
+                return stages, outcome
+            await asyncio.sleep(0.02)
 
 
 def format_latency(results: list[AudioScenarioResult]) -> str:
@@ -167,6 +242,8 @@ def format_latency(results: list[AudioScenarioResult]) -> str:
     lines = [
         "",
         "latency by stage, milliseconds",
+        "response latency: not measured (no speech-end-to-first-audio probe)",
+        "playback_start_ms: playback acknowledgement, not audible onset",
         "",
         f"{'stage':<20} {'n':>5} {'p50':>7} {'p95':>7}",
     ]
@@ -200,7 +277,14 @@ def parse_args() -> argparse.Namespace:
 
 async def run(args: argparse.Namespace) -> int:
     settings = get_settings()
+    try:
+        validate_eval_url(args.stream_url)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if args.n < 1:
+        raise SystemExit("Audio evaluation repeats must be positive")
     for name, value in (
+        ("AUDIO_EVAL_TOKEN", settings.audio_eval_token),
         ("CARTESIA_API_KEY", settings.cartesia_api_key),
         ("LLM_API_KEY", settings.llm_api_key),
     ):
@@ -224,7 +308,9 @@ async def run(args: argparse.Namespace) -> int:
     caller_llm = AnthropicStructuredLLM(settings)
     results: list[AudioScenarioResult] = []
 
-    async with CartesiaTTS(settings) as caller_tts:
+    async with CartesiaTTS(
+        settings.model_copy(update={"cartesia_voice_id": caller_voice})
+    ) as caller_tts:
         for repeat in range(args.n):
             for persona in personas:
                 print(f"  {persona.id} r{repeat} ...", flush=True)
@@ -235,11 +321,12 @@ async def run(args: argparse.Namespace) -> int:
                     caller_llm=caller_llm,
                     caller_voice_id=caller_voice,
                     repeat_index=repeat,
+                    auth_token=settings.audio_eval_token,
                 )
                 results.append(result)
                 print(
                     f"    outcome={result.outcome}  turns={result.turns}  "
-                    f"barge_ins={result.barge_ins}  p50={result.latency_p50_ms}ms"
+                    f"barge_ins={result.barge_ins}  response latency=not measured"
                     + (f"  error={result.error}" if result.error else "")
                 )
 
@@ -260,15 +347,23 @@ def write_results(args: argparse.Namespace, results: list[AudioScenarioResult], 
             tier=Tier.AUDIO,
         )
         for result in results:
+            error = result.error
+            if error is None and (result.outcome is None or result.turns == 0):
+                error = "No completed audio conversation was recorded"
             repo.add_result(
                 run_row.id,
                 scenario_id=result.scenario_id,
                 repeat_index=result.repeat_index,
-                passed=result.error is None,
+                passed=error is None,
                 latency_p50_ms=result.latency_p50_ms,
                 latency_p95_ms=result.latency_p95_ms,
-                actual={"outcome": result.outcome, "barge_ins": result.barge_ins},
-                notes=result.error,
+                actual={
+                    "outcome": result.outcome,
+                    "barge_ins": result.barge_ins,
+                    "routing": "simulated_no_external_actions",
+                    "response_latency": "not_measured",
+                },
+                notes=error,
             )
         return run_row.id
 

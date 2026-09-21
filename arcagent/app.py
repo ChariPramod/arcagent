@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Form, Response, WebSocket
+from starlette.websockets import WebSocketState
 
 from arcagent import __version__
 from arcagent.agent.graph import AgentConfig
@@ -20,7 +21,12 @@ from arcagent.telephony.availability import CoordinatorAvailability, get_availab
 from arcagent.telephony.call_session import CallSession
 from arcagent.telephony.persistence_sink import DatabaseTurnSink
 from arcagent.telephony.routing import CallRouter
-from arcagent.telephony.security import validate_twilio_request
+from arcagent.telephony.security import (
+    validate_admin_request,
+    validate_audio_eval_websocket,
+    validate_twilio_request,
+    validate_twilio_websocket,
+)
 from arcagent.telephony.session_handler import TwilioWebSocket, run_echo_session
 from arcagent.telephony.twiml import connect_stream
 
@@ -62,13 +68,13 @@ async def voice_inbound(
     return Response(content=twiml, media_type="application/xml")
 
 
-@app.get("/admin/coordinator")
+@app.get("/admin/coordinator", dependencies=[Depends(validate_admin_request)])
 async def get_coordinator(settings: Settings = Depends(get_settings)) -> dict[str, bool]:
     """Whether a warm transfer would be accepted right now."""
     return {"available": get_availability(settings.coordinator_available).available}
 
 
-@app.post("/admin/coordinator")
+@app.post("/admin/coordinator", dependencies=[Depends(validate_admin_request)])
 async def set_coordinator(
     available: bool,
     settings: Settings = Depends(get_settings),
@@ -80,15 +86,32 @@ async def set_coordinator(
 
 
 @app.websocket("/voice/stream")
-async def voice_stream(websocket: WebSocket) -> None:
+async def voice_stream(websocket: WebSocket, settings: Settings = Depends(get_settings)) -> None:
     """Twilio media stream: STT, the LangGraph agent, TTS, then routing."""
+    if not await validate_twilio_websocket(websocket, settings):
+        return
+    await _run_voice_session(websocket, settings)
+
+
+@app.websocket("/eval/voice/stream")
+async def eval_voice_stream(
+    websocket: WebSocket, settings: Settings = Depends(get_settings)
+) -> None:
+    """Explicitly enabled test-only stream; finalization never routes or sends SMS."""
+    if not await validate_audio_eval_websocket(websocket, settings):
+        return
+    await _run_voice_session(websocket, settings, evaluation=True)
+
+
+async def _run_voice_session(
+    websocket: WebSocket, settings: Settings, *, evaluation: bool = False
+) -> None:
     await websocket.accept()
-    settings = get_settings()
     availability = get_availability(settings.coordinator_available)
 
     stt = DeepgramSTT(settings)
     tts = CartesiaTTS(settings)
-    sink = DatabaseTurnSink()
+    sink = DatabaseTurnSink(settings.database_url)
     responder = GraphResponder(
         AgentConfig(
             llm=AnthropicStructuredLLM(settings),
@@ -98,23 +121,38 @@ async def voice_stream(websocket: WebSocket) -> None:
         )
     )
 
-    await stt.start()
-    await tts.start()
-    session = CallSession(
-        socket=TwilioWebSocket(websocket),
-        stt=stt,
-        tts=tts,
-        responder=responder,
-        settings=settings,
-        turn_sink=sink,
-        on_start=sink.open,
-    )
     try:
+        await stt.start()
+        await tts.start()
+        session = CallSession(
+            socket=TwilioWebSocket(websocket),
+            stt=stt,
+            tts=tts,
+            responder=responder,
+            settings=settings,
+            turn_sink=sink,
+            on_start=sink.open,
+        )
         await session.run()
-        await _finish_call(settings, session, responder, sink, availability)
+        if evaluation:
+            # Outcomes describe a simulation. Never execute coordinator transfers or SMS.
+            outcome = (
+                "language_fallback"
+                if session.language_fallback
+                else session.outcome or responder.outcome or "abandoned"
+            )
+            await sink.close(
+                Outcome(outcome), final_node=f"audio_eval:{responder.node_name or 'ended'}"[:64]
+            )
+        else:
+            await _finish_call(settings, session, responder, sink, availability)
+        if websocket.client_state is WebSocketState.CONNECTED:
+            await websocket.close(code=1000)
     finally:
-        await stt.close()
-        await tts.close()
+        try:
+            await stt.close()
+        finally:
+            await tts.close()
 
 
 async def _finish_call(
@@ -136,13 +174,19 @@ async def _finish_call(
         log.info("call_ended", outcome="language_fallback", dtmf_digits=len(session.dtmf_digits))
         return
 
+    if outcome == "abandoned" or not responder.should_end or outcome is None:
+        await sink.close(Outcome.ABANDONED, final_node=responder.node_name)
+        log.info("call_ended", outcome="abandoned")
+        return
+
     if not responder.creates_a_lead or sink.call_id is None:
         await sink.close(Outcome(outcome or "abandoned"), final_node=responder.node_name)
         log.info("call_ended", outcome=outcome)
         return
 
     router = CallRouter(
-        settings.model_copy(update={"coordinator_available": availability.available})
+        settings.model_copy(update={"coordinator_available": availability.available}),
+        database_url=settings.database_url,
     )
     result = await router.finish_call(
         call_id=sink.call_id,
@@ -161,7 +205,12 @@ async def _finish_call(
 
 
 @app.websocket("/voice/echo")
-async def voice_echo(websocket: WebSocket) -> None:
+async def voice_echo(websocket: WebSocket, settings: Settings = Depends(get_settings)) -> None:
     """Echo loop, kept for diagnosing a call where the audio itself is wrong."""
+    if not settings.echo_enabled:
+        await websocket.close(code=1008)
+        return
+    if not await validate_twilio_websocket(websocket, settings):
+        return
     await websocket.accept()
     await run_echo_session(TwilioWebSocket(websocket))

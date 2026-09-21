@@ -20,7 +20,7 @@ def test_a_complete_turn_populates_all_four_columns() -> None:
     clock = FakeClock()
     t = TurnTimings(clock=clock)
 
-    t.mark_audio_frame()  # last frame of caller speech at 0.0
+    t.mark_audio_frame()  # latest inbound frame at 0.0
     clock.advance(0.25)
     t.mark_stt_final()  # Deepgram final at 0.25
     t.mark_llm_start()
@@ -39,7 +39,7 @@ def test_a_complete_turn_populates_all_four_columns() -> None:
         "tts_first_byte_ms": 120,
         "playback_start_ms": 80,
     }
-    assert t.response_ms == 420  # end of caller speech to first frame on the wire
+    assert t.response_ms == 420  # transcript receipt to first frame on the wire
 
 
 def test_stages_that_did_not_run_are_none_not_zero() -> None:
@@ -78,7 +78,7 @@ def test_only_the_first_mark_of_each_stage_counts() -> None:
     assert t.as_columns()["tts_first_byte_ms"] == 100
 
 
-def test_last_audio_frame_wins_so_stt_is_measured_from_end_of_speech() -> None:
+def test_stt_proxy_uses_latest_inbound_frame_including_silence() -> None:
     clock = FakeClock()
     t = TurnTimings(clock=clock)
     for _ in range(50):  # a second of frames
@@ -95,7 +95,7 @@ def test_an_out_of_order_clock_never_produces_a_negative_duration() -> None:
     assert t.as_columns()["stt_final_ms"] == 0
 
 
-def test_stt_final_can_be_taken_from_the_vendor_timestamp() -> None:
+def test_stt_boundary_can_use_timestamp_captured_on_receipt() -> None:
     clock = FakeClock()
     t = TurnTimings(clock=clock)
     t.mark_audio_frame()

@@ -2,10 +2,15 @@
 
 Every turn records the four stages in the budget table in docs/latency_and_cost.md:
 
-    stt_final_ms       caller stopped talking to Deepgram's final transcript
-    llm_ttft_ms        transcript handed to the agent to its first token
+    stt_final_ms       last inbound audio frame to receipt of the turn boundary
+    llm_ttft_ms        agent invocation to its first yielded response chunk
     tts_first_byte_ms  synthesis requested to Cartesia's first audio byte
-    playback_start_ms  first frame written to Twilio to Twilio's mark acknowledgement
+    playback_start_ms  first frame written to Twilio to playback completion acknowledgement
+
+The legacy column names are retained for compatibility. Inbound frames include silence,
+so stt_final_ms is not end-of-speech latency. A structured responder may yield only after
+its entire LLM request completes, so llm_ttft_ms is not necessarily provider token TTFT.
+Twilio marks acknowledge completed playback, not the first audio heard by the caller.
 
 All four are milliseconds against a monotonic clock. A stage that did not happen stays
 None, which is different from zero, and the database column is nullable for that reason.
@@ -86,7 +91,7 @@ class TurnTimings:
 
     @property
     def response_ms(self) -> int | None:
-        """End of caller speech to first agent audio on the wire. The number that matters."""
+        """Boundary receipt to first agent audio written; not caller-perceived latency."""
         return _ms(self.stt_final_at, self.first_frame_written_at)
 
     def as_columns(self) -> dict[str, int | None]:

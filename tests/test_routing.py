@@ -270,17 +270,28 @@ class TestEndOfCallRouting:
             session.close()
 
     async def test_no_open_slot_is_reported_not_crashed(self, routed) -> None:
-        router, _client, call_id, _factory = routed(seed_slots=False)
+        router, client, call_id, factory = routed(seed_slots=False)
         result = await router.finish_call(call_id, "CA_route", COLD)
         assert result.error == "no open slot"
-        assert result.outcome is Outcome.CALLBACK_BOOKED
+        assert result.outcome is Outcome.ABANDONED
+        assert result.slot_start is None
+        assert client.messages_sent == []
+        with factory() as session:
+            assert session.query(Callback).count() == 0
+            assert session.query(Lead).count() == 1
 
     async def test_a_caller_who_gave_no_number_gets_no_text(self, routed) -> None:
-        router, client, call_id, _factory = routed()
+        router, client, call_id, factory = routed()
         fields = LeadFields(treatment_interest=TreatmentInterest.SINGLE_IMPLANT)
         result = await router.finish_call(call_id, "CA_route", fields)
         assert result.error == "no callback number captured"
+        assert result.outcome is Outcome.ABANDONED
+        assert result.slot_start is None
         assert client.messages_sent == []
+        with factory() as session:
+            assert session.query(Callback).count() == 0
+            assert session.query(Slot).filter(Slot.booked.is_(True)).count() == 0
+            assert session.query(Lead).count() == 1
 
     async def test_no_coordinator_routes_a_hot_lead_to_a_callback(self, routed) -> None:
         router, client, call_id, _factory = routed(coordinator_available=False)
@@ -289,6 +300,52 @@ class TestEndOfCallRouting:
         assert result.outcome is Outcome.CALLBACK_BOOKED
         assert client.call_updates == []
         assert len(client.messages_sent) == 1
+
+    @pytest.mark.parametrize("fields", [HOT, COLD])
+    async def test_database_failure_prevents_external_actions(self, routed, fields) -> None:
+        router, client, call_id, factory = routed()
+        with factory() as session:
+            Lead.__table__.drop(session.get_bind())
+
+        result = await router.finish_call(call_id, "CA_route", fields)
+
+        assert result.outcome is Outcome.ABANDONED
+        assert result.error == "routing persistence failed"
+        assert result.lead_id is None
+        assert not result.succeeded
+        assert client.messages_sent == []
+        assert client.call_updates == []
+        with factory() as session:
+            assert session.query(Callback).count() == 0
+            assert session.query(Slot).filter(Slot.booked.is_(True)).count() == 0
+
+    async def test_sms_receipt_write_failure_preserves_booking_and_sent_receipt(self, routed):
+        from sqlalchemy import event
+        from sqlalchemy.exc import OperationalError
+
+        router, client, call_id, factory = routed()
+        with factory() as session:
+            engine = session.get_bind()
+
+        def fail_receipt_write(conn, cursor, statement, parameters, context, executemany):
+            if statement.startswith("UPDATE callbacks"):
+                raise OperationalError(statement, parameters, Exception("storage unavailable"))
+
+        event.listen(engine, "before_cursor_execute", fail_receipt_write)
+        try:
+            result = await router.finish_call(call_id, "CA_route", COLD, consent_turn_index=7)
+        finally:
+            event.remove(engine, "before_cursor_execute", fail_receipt_write)
+
+        assert result.outcome is Outcome.CALLBACK_BOOKED
+        assert result.slot_start is not None
+        assert result.sms_sid == "SM_test_sid"
+        assert result.error == "SMS sent but receipt persistence failed"
+        assert not result.succeeded
+        assert len(client.messages_sent) == 1
+        with factory() as session:
+            assert session.query(Callback).one().sms_sid is None
+            assert session.query(Slot).filter(Slot.booked.is_(True)).count() == 1
 
     async def test_two_callbacks_take_different_slots(self, routed) -> None:
         router, _client, call_id, factory = routed()
@@ -344,9 +401,11 @@ class TestAvailabilityEndpoint:
         from arcagent.app import app
         from arcagent.config import get_settings
 
-        app.dependency_overrides[get_settings] = lambda: settings(coordinator_available=False)
+        app.dependency_overrides[get_settings] = lambda: settings(
+            coordinator_available=False, admin_api_token="test-admin-token"
+        )
         try:
-            with TestClient(app) as client:
+            with TestClient(app, headers={"Authorization": "Bearer test-admin-token"}) as client:
                 assert client.get("/admin/coordinator").json() == {"available": False}
         finally:
             app.dependency_overrides.clear()
@@ -357,9 +416,11 @@ class TestAvailabilityEndpoint:
         from arcagent.app import app
         from arcagent.config import get_settings
 
-        app.dependency_overrides[get_settings] = lambda: settings()
+        app.dependency_overrides[get_settings] = lambda: settings(
+            admin_api_token="test-admin-token"
+        )
         try:
-            with TestClient(app) as client:
+            with TestClient(app, headers={"Authorization": "Bearer test-admin-token"}) as client:
                 assert client.post("/admin/coordinator?available=false").json() == {
                     "available": False
                 }

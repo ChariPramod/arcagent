@@ -56,6 +56,8 @@ class TestParrot:
         harness = build_harness(ScriptedResponder(["how can i help"]))
         await harness.start()
         await harness.caller_says("hi there")
+        assert await harness.wait_until(lambda: harness.twilio.sent_of("mark") != [])
+        harness.twilio.push(mark_message(harness.twilio.sent_of("mark")[0]["mark"]["name"]))
         assert await harness.wait_until(lambda: len(harness.turns) >= 2)
         await harness.stop()
 
@@ -68,7 +70,7 @@ class TestParrot:
         harness = build_harness(ScriptedResponder(["understood"]))
         await harness.start()
         await harness.caller_says("hi")
-        assert await harness.wait_until(lambda: len(harness.turns) >= 2)
+        assert await harness.wait_until(lambda: harness.twilio.sent_of("mark") != [])
         harness.twilio.push(mark_message(harness.session.stream.pending_marks[0]))
         await harness.settle()
         await harness.stop()
@@ -133,3 +135,221 @@ class TestHangup:
             for m in harness.twilio.sent
             if m.get("event") == "media"
         )
+
+
+class TestUtteranceAssembly:
+    async def test_endpoint_preserves_every_final_segment(self) -> None:
+        responder = ScriptedResponder()
+        harness = build_harness(responder)
+        await harness.start()
+        try:
+            await harness.caller_says("I need implants", speech_final=False)
+            await harness.caller_says("and have insurance")
+            assert await harness.wait_until(lambda: responder.heard != [])
+            assert responder.heard == ["I need implants and have insurance"]
+            assert [t.text for t in harness.turns if t.speaker == "caller"] == [
+                "I need implants and have insurance"
+            ]
+        finally:
+            await harness.stop()
+
+    async def test_utterance_end_flushes_final_segments_without_an_endpoint(self) -> None:
+        from tests.fakes import dg_utterance_end
+
+        responder = ScriptedResponder()
+        harness = build_harness(responder)
+        await harness.start()
+        try:
+            await harness.caller_says("I need implants", speech_final=False)
+            harness.stt_socket.push(dg_utterance_end())
+            assert await harness.wait_until(lambda: responder.heard != [])
+            harness.stt_socket.push(dg_utterance_end())
+            await harness.caller_says("", speech_final=True)
+            assert responder.heard == ["I need implants"]
+        finally:
+            await harness.stop()
+
+    async def test_an_empty_endpoint_flushes_preceding_final_text(self) -> None:
+        responder = ScriptedResponder()
+        harness = build_harness(responder)
+        await harness.start()
+        try:
+            await harness.caller_says("I need implants", speech_final=False)
+            await harness.caller_says("")
+            assert responder.heard == ["I need implants"]
+        finally:
+            await harness.stop()
+
+    async def test_late_utterance_end_does_not_flush_the_next_utterance(self) -> None:
+        from tests.fakes import dg_results, dg_utterance_end
+
+        responder = ScriptedResponder()
+        harness = build_harness(responder)
+        await harness.start()
+        try:
+            harness.stt_socket.push(dg_results("first", True, True, start=0, duration=1))
+            await harness.settle()
+            harness.stt_socket.push(dg_results("second", True, False, start=3, duration=1))
+            harness.stt_socket.push(dg_utterance_end(last_word_end=1))
+            await harness.settle()
+            assert responder.heard == ["first"]
+            harness.stt_socket.push(dg_results("thought", True, True, start=4, duration=1))
+            await harness.settle()
+            assert responder.heard == ["first", "second thought"]
+        finally:
+            await harness.stop()
+
+
+class TestPlaybackAccounting:
+    async def test_agent_turn_is_persisted_with_its_own_playback_acknowledgement(self) -> None:
+        from tests.test_latency import FakeClock
+
+        clock = FakeClock()
+        harness = build_harness(ScriptedResponder(["understood"]), clock=clock)
+        await harness.start()
+        try:
+            await harness.caller_says("hi")
+            assert await harness.wait_until(lambda: harness.twilio.sent_of("mark") != [])
+            assert not [t for t in harness.turns if t.speaker == "agent"]
+            clock.advance(0.75)
+            harness.twilio.push(mark_message(harness.twilio.sent_of("mark")[0]["mark"]["name"]))
+            assert await harness.wait_until(lambda: len(harness.turns) == 2)
+            assert harness.turns[1].latency["playback_start_ms"] == 750
+        finally:
+            await harness.stop()
+
+    async def test_terminal_reply_waits_for_playback_before_ending(self) -> None:
+        responder = ScriptedResponder(["goodbye"])
+        harness = build_harness(responder)
+        await harness.start()
+        try:
+            responder.should_end = True
+            await harness.caller_says("bye")
+            assert await harness.wait_until(lambda: harness.twilio.sent_of("mark") != [])
+            assert harness.session.state is SessionState.SPEAKING
+            harness.twilio.push(mark_message(harness.twilio.sent_of("mark")[0]["mark"]["name"]))
+            assert await harness.wait_until(lambda: harness.session.state is SessionState.ENDING)
+            assert harness.turns[-1].text == "goodbye"
+            assert not harness.turns[-1].interrupted
+        finally:
+            await harness.stop()
+
+    async def test_late_mark_from_interrupted_turn_cannot_complete_the_next_turn(self) -> None:
+        from tests.test_latency import FakeClock
+
+        clock = FakeClock()
+        harness = build_harness(ScriptedResponder(["first reply", "second reply"]), clock=clock)
+        await harness.start()
+        try:
+            await harness.caller_says("first question")
+            first_mark = harness.twilio.sent_of("mark")[0]["mark"]["name"]
+            clock.advance(0.5)
+            await harness.caller_says("second question")
+            second_mark = harness.twilio.sent_of("mark")[1]["mark"]["name"]
+            clock.advance(0.25)
+            harness.twilio.push(mark_message(first_mark))
+            await harness.settle()
+            assert harness.session.state is SessionState.SPEAKING
+            assert [t.text for t in harness.turns if t.speaker == "agent"] == ["first reply"]
+            assert harness.turns[1].interrupted
+            assert harness.turns[1].latency["playback_start_ms"] is None
+            clock.advance(0.5)
+            harness.twilio.push(mark_message(second_mark))
+            await harness.settle()
+            assert harness.turns[-1].text == "second reply"
+            assert harness.turns[-1].latency["playback_start_ms"] == 750
+            assert not harness.turns[-1].interrupted
+        finally:
+            await harness.stop()
+
+    async def test_missing_playback_acknowledgement_has_a_bounded_wait(self) -> None:
+        import asyncio
+
+        harness = build_harness(ScriptedResponder(["goodbye"]))
+        harness.session.playback_timeout_s = 0.01
+        await harness.start()
+        try:
+            await harness.caller_says("bye")
+            await asyncio.sleep(0.03)
+            assert harness.session.state is SessionState.ENDING
+            assert harness.turns[-1].interrupted
+            assert harness.turns[-1].latency["playback_start_ms"] is None
+            assert harness.twilio.sent_of("clear")
+        finally:
+            await harness.stop()
+
+    async def test_marks_returned_by_clear_do_not_claim_successful_playback(self) -> None:
+        harness = build_harness(ScriptedResponder(["first reply", "second reply"]))
+        original_send = harness.twilio.send_json
+
+        async def send_with_clear_ack(message):
+            await original_send(message)
+            if message["event"] == "clear":
+                name = harness.twilio.sent_of("mark")[0]["mark"]["name"]
+                harness.twilio.push(mark_message(name))
+                await harness.settle()
+
+        harness.twilio.send_json = send_with_clear_ack
+        await harness.start()
+        try:
+            await harness.caller_says("first question")
+            await harness.caller_says("second question")
+            assert await harness.wait_until(
+                lambda: any(t.speaker == "agent" for t in harness.turns)
+            )
+            first = next(t for t in harness.turns if t.speaker == "agent")
+            assert first.interrupted
+            assert first.latency["playback_start_ms"] is None
+        finally:
+            await harness.stop()
+
+    async def test_synthesis_failure_ends_safely_instead_of_leaving_a_silent_call(self) -> None:
+        harness = build_harness(ScriptedResponder(["reply"]), tts_auto=False)
+        await harness.start()
+        try:
+            await harness.caller_says("question")
+            context = harness.tts_socket.requests[0]["context_id"]
+            harness.tts_socket.push({"type": "error", "context_id": context, "error": "failed"})
+            assert await harness.wait_until(lambda: harness.session.state is SessionState.ENDING)
+            assert harness.session.outcome == "abandoned"
+            assert harness.turns[-1].interrupted
+            assert harness.turns[-1].latency["playback_start_ms"] is None
+        finally:
+            await harness.stop()
+
+    async def test_acknowledging_one_chunk_does_not_hide_the_next_active_synthesis(self) -> None:
+        class ChunkedResponder(ScriptedResponder):
+            async def respond(self, transcript):
+                if transcript:
+                    yield "first chunk"
+                    yield "second chunk"
+
+        harness = build_harness(ChunkedResponder(), tts_auto=False)
+        await harness.start()
+        try:
+            await harness.caller_says("question")
+            first_context = harness.tts_socket.requests[0]["context_id"]
+            harness.tts_socket.push_chunk(first_context, b"\x01" * 160)
+            harness.tts_socket.push_done(first_context)
+            assert await harness.wait_until(lambda: len(harness.tts_socket.requests) == 2)
+            assert await harness.wait_until(lambda: bool(harness.twilio.sent_of("mark")))
+            harness.twilio.push(mark_message(harness.twilio.sent_of("mark")[0]["mark"]["name"]))
+            await harness.settle()
+            assert harness.session.state is SessionState.SPEAKING
+            await harness.caller_says("wait", is_final=False, speech_final=False)
+            assert harness.session.barge_ins == 0
+            await harness.caller_says("actually wait a moment", is_final=False, speech_final=False)
+            assert harness.session.barge_ins == 1
+        finally:
+            await harness.stop()
+
+    async def test_hangup_before_terminal_playback_is_abandoned(self) -> None:
+        responder = ScriptedResponder(["goodbye"])
+        harness = build_harness(responder)
+        await harness.start()
+        responder.should_end = True
+        await harness.caller_says("bye")
+        assert await harness.wait_until(lambda: bool(harness.twilio.sent_of("mark")))
+        await harness.stop()
+        assert harness.session.outcome == "abandoned"
+        assert harness.turns[-1].interrupted

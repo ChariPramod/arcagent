@@ -12,7 +12,7 @@ import asyncio
 from arcagent.agent.edge_cases import SILENCE_GOODBYE, SILENCE_REPROMPT
 from arcagent.config import Settings
 from arcagent.telephony.call_session import SessionState
-from tests.fakes import dg_results, media_message
+from tests.fakes import dg_results, mark_message, media_message
 from tests.harness import FRAME, ScriptedResponder, build_harness
 
 
@@ -121,6 +121,8 @@ class TestBargeIn:
         harness = build_harness(ScriptedResponder(["a long answer"]), tts_auto=False)
         context_id = await _start_long_utterance(harness)
         harness.tts_socket.push_done(context_id)
+        assert await harness.wait_until(lambda: harness.twilio.sent_of("mark") != [])
+        harness.twilio.push(mark_message(harness.twilio.sent_of("mark")[0]["mark"]["name"]))
         assert await harness.wait_until(lambda: any(t.speaker == "agent" for t in harness.turns))
 
         # Speak a second utterance and interrupt that one.
@@ -239,6 +241,9 @@ class TestSilence:
         )
         await harness.start()
         clock.advance(16)
+        assert await harness.wait_until(lambda: harness.twilio.sent_of("mark") != [], rounds=2000)
+        assert harness.session.state is SessionState.SPEAKING
+        harness.twilio.push(mark_message(harness.twilio.sent_of("mark")[0]["mark"]["name"]))
         assert await harness.wait_until(
             lambda: harness.session.state is SessionState.ENDING, rounds=2000
         )
@@ -353,3 +358,25 @@ class TestSilenceLines:
         assert await harness.wait_until(lambda: harness.tts_socket.requests != [])
         await harness.stop()
         assert harness.tts_socket.requests[0]["transcript"] == "ok"
+
+
+async def test_failed_vendor_cancel_does_not_lose_the_interrupting_caller_turn() -> None:
+    import json
+
+    responder = ScriptedResponder(["first answer", "second answer"])
+    harness = build_harness(responder, tts_auto=False)
+    original_send = harness.tts_socket.send
+
+    async def send_with_failed_cancel(data):
+        if json.loads(data).get("cancel"):
+            raise ConnectionError("vendor cancel unavailable")
+        await original_send(data)
+
+    harness.tts_socket.send = send_with_failed_cancel
+    await _start_long_utterance(harness)
+    try:
+        await harness.caller_says("actually another question")
+        assert await harness.wait_until(lambda: len(harness.tts_socket.requests) == 2)
+        assert responder.heard == ["tell me about implants", "actually another question"]
+    finally:
+        await harness.stop()

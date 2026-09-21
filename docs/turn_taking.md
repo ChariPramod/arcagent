@@ -6,7 +6,8 @@ and the tests that hold it to this document are `tests/test_barge_in.py`.
 
 ## Tasks
 
-One `asyncio.TaskGroup` per call, four tasks, no others.
+One `asyncio.TaskGroup` per call owns the transport and conversation loops. The agent
+loop also owns a cancellable reply task.
 
 | Task | Reads | Writes |
 |---|---|---|
@@ -14,6 +15,7 @@ One `asyncio.TaskGroup` per call, four tasks, no others.
 | `transcripts` | Deepgram events | turn queue, session state |
 | `agent` | turn queue | outbound audio queue |
 | `writer` | outbound audio queue | Twilio WebSocket |
+| `silence` | session activity and state | reprompt and goodbye requests |
 
 `writer` is the only task that writes audio to Twilio. Nothing else may call `send_json`
 with a media frame. This is the single property that makes "the agent talked over itself"
@@ -55,13 +57,13 @@ The barge in sequence, in this order, and the order matters:
 2. Drain the outbound queue. Anything still queued is for the abandoned utterance.
 3. Send Twilio `clear`. This discards audio Twilio has buffered but not yet played.
    Sending `clear` before draining would let the writer push more frames in behind it.
-4. Clear `pending_marks`. Twilio will not send marks for audio it just discarded, so a
-   session waiting on them would wait forever.
+4. Clear `pending_marks`. Twilio returns marks for cleared audio too. Playback ownership
+   is invalidated before sending `clear`, so these returned marks cannot certify playback.
 5. Cancel the agent task, which cancels the LLM call and the TTS stream inside it.
 6. Tell Cartesia to cancel the context. Best effort, saves billed characters, and the
    correctness of steps 1 to 5 does not depend on it landing.
-7. Record the interrupted turn with `interrupted=True` and the text the agent had actually
-   got through, not the text it intended to say.
+7. Record each pending utterance once with `interrupted=True` and its generated text.
+   This is not a transcript of the exact spoken prefix; that requires audio alignment.
 8. Start the new turn from the caller transcript that caused the interruption.
 
 The abandoned `context_id` stays in a `discarded` set for the rest of the call. Late chunks
@@ -69,8 +71,8 @@ for it are dropped by the writer rather than played.
 
 ## Silence
 
-Timer resets on every inbound media frame that carries speech, and on every caller
-transcript.
+Caller transcripts reset the timer. Successful playback also resets the listening window.
+Inbound media alone does not establish that a caller spoke.
 
 - `SILENCE_REPROMPT_S` (default 8) with no caller transcript while `LISTENING`: speak one
   re-prompt. Only once per call.

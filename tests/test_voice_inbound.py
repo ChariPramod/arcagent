@@ -26,6 +26,7 @@ def client() -> Iterator[TestClient]:
         public_url=PUBLIC_URL,
         twilio_auth_token=AUTH_TOKEN,
         validate_twilio_signature=True,
+        echo_enabled=True,
         coordinator_number="+15550001111",
     )
     app.dependency_overrides[get_settings] = lambda: settings
@@ -96,7 +97,10 @@ class TestEchoRoute:
 
     def test_media_frames_are_echoed_over_the_real_route(self, client: TestClient) -> None:
         payload = bytes([0xFF, 0x7E]) * 80
-        with client.websocket_connect("/voice/echo") as ws:
+        with client.websocket_connect(
+            "/voice/echo",
+            headers=_signed_headers("wss://arcagent.example.ngrok.app/voice/echo", {}),
+        ) as ws:
             ws.send_json(connected_message())
             ws.send_json(start_message())
             ws.send_json(media_message(payload))
@@ -106,7 +110,10 @@ class TestEchoRoute:
         assert base64.b64decode(echoed["media"]["payload"]) == payload
 
     def test_client_hangup_closes_the_session_cleanly(self, client: TestClient) -> None:
-        with client.websocket_connect("/voice/echo") as ws:
+        with client.websocket_connect(
+            "/voice/echo",
+            headers=_signed_headers("wss://arcagent.example.ngrok.app/voice/echo", {}),
+        ) as ws:
             ws.send_json(start_message())
             ws.close()
 

@@ -18,6 +18,7 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from arcagent.logging import get_logger
 from arcagent.telephony.twilio_stream import FRAME_BYTES, FRAME_MS, chunk_audio
@@ -58,7 +59,11 @@ class FakeTwilioCall:
         call_sid: str | None = None,
         from_number: str = "+15550000000",
         realtime: bool = True,
+        auth_token: str = "",
     ) -> None:
+        if auth_token:
+            validate_eval_url(url)
+        self.auth_token = auth_token
         self.url = url
         self.call_sid = call_sid or f"CA{uuid.uuid4().hex}"
         self.stream_sid = f"MZ{uuid.uuid4().hex}"
@@ -73,7 +78,12 @@ class FakeTwilioCall:
     async def __aenter__(self) -> FakeTwilioCall:
         import websockets
 
-        self.socket = await websockets.connect(self.url)
+        validate_eval_url(self.url)
+        if not self.auth_token:
+            raise ValueError("An audio evaluation token is required")
+        self.socket = await websockets.connect(
+            self.url, additional_headers={"Authorization": f"Bearer {self.auth_token}"}
+        )
         self._reader = asyncio.create_task(self._read_loop(), name="fake-twilio-reader")
         return self
 
@@ -203,6 +213,10 @@ class FakeTwilioCall:
             pass
         if self._reader is not None:
             self._reader.cancel()
+            try:
+                await self._reader
+            except asyncio.CancelledError:
+                pass
         if self.socket is not None:
             try:
                 await self.socket.close()
@@ -217,3 +231,21 @@ def mulaw_duration_s(audio: bytes) -> float:
 
 def frame_count(audio: bytes) -> int:
     return (len(audio) + FRAME_BYTES - 1) // FRAME_BYTES
+
+
+def validate_eval_url(url: str) -> None:
+    """Never direct the synthetic caller to a production voice route or leak its token."""
+    parsed = urlsplit(url)
+    secure = parsed.scheme == "wss" or (
+        parsed.scheme == "ws" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    )
+    if (
+        not secure
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path != "/eval/voice/stream"
+    ):
+        raise ValueError("Use a secure isolated audio evaluation endpoint")
