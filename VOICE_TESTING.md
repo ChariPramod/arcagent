@@ -2,6 +2,14 @@
 
 This guide covers the first reliability iteration. See [ITERATION_PLAN.md](ITERATION_PLAN.md) for the delivery sequence and [the playbook](DATA_CLOUD_AND_VALIDATION_PLAYBOOK.md) for data sourcing and costs.
 
+## Offline readiness before vendor work
+
+Run `.venv/bin/python -m evals.preflight --prompts v1 --json` from the repository root. Exit `0` means the selected inputs pass structural checks; `2` means they do not. The report lists fixed issue codes without printing prompt or persona contents. No credentials or network access are needed. Select `--groups` or `--ids` for a subset; empty selections fail. `--personas-dir` supports a candidate suite without certifying its independence.
+
+Required prompts must exist, contain nonblank text, and have no `TODO_OWNER` marker. Versions use `v` followed by digits. Text/mutation entrypoints enforce readiness before model work. Audio checks prompts on the remote server. Authenticated inbound calls return HTTP `503` when prompts are not ready; authenticated voice/evaluation WebSocket upgrades are rejected before speech-vendor startup. The ASGI close code is `1011`; because rejection precedes acceptance, network clients may receive an HTTP handshake rejection instead of a WebSocket close frame. Echo remains a separate authenticated diagnostic.
+
+There is no production bypass. Passing structure does not prove approved or semantically complete wording: do not merely remove markers for a real benchmark. Tests explicitly select temporary ready fixtures. Restart the server after prompt edits because readiness and the graph share the cached loader.
+
 ## Environments and credentials
 
 Use a separate database for synthetic audio evaluations. The evaluation server writes simulated call outcomes into its own calls table. These are not evidence that a coordinator answered or a callback was booked. Do not connect this database to a production workspace.

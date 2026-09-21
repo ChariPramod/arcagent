@@ -3,6 +3,15 @@
 For authenticated synthetic audio transport, isolation requirements, and measurement
 limitations, see [Controlled voice testing](../VOICE_TESTING.md).
 
+Check selected inputs without credentials first:
+
+```bash
+python -m evals.preflight --prompts v1 --json
+```
+
+Placeholder prompts and empty selected suites fail. Passing verifies structure, not approved
+wording or independent labels. Use the new reviewed prompt version when it is ready.
+
 Apply database migrations before writing new evaluations:
 
 ```bash

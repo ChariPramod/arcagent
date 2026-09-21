@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Form, Response, WebSocket
+from fastapi import Depends, FastAPI, Form, HTTPException, Response, WebSocket
 from starlette.websockets import WebSocketState
 
 from arcagent import __version__
 from arcagent.agent.graph import AgentConfig
 from arcagent.agent.llm import AnthropicStructuredLLM
+from arcagent.agent.readiness import PromptReadinessError, require_ready_prompts
 from arcagent.agent.responder import GraphResponder
 from arcagent.config import Settings, get_settings
 from arcagent.console.api import router as console_router
@@ -65,6 +66,11 @@ async def voice_inbound(
     The call sid and the caller's number are passed as stream parameters, because the
     WebSocket handler is a separate connection that never sees this request.
     """
+    try:
+        require_ready_prompts(settings.prompt_version)
+    except PromptReadinessError as exc:
+        log.warning("voice_not_ready", issues=str(exc))
+        raise HTTPException(status_code=503, detail="voice service is not ready") from None
     twiml = connect_stream(settings.stream_url, {"call_sid": CallSid, "from": From})
     log.info("inbound_call_answered", stream_url=settings.stream_url, call_sid=CallSid)
     return Response(content=twiml, media_type="application/xml")
@@ -108,6 +114,12 @@ async def eval_voice_stream(
 async def _run_voice_session(
     websocket: WebSocket, settings: Settings, *, evaluation: bool = False
 ) -> None:
+    try:
+        require_ready_prompts(settings.prompt_version)
+    except PromptReadinessError as exc:
+        log.warning("voice_not_ready", issues=str(exc))
+        await websocket.close(code=1011, reason="voice service is not ready")
+        return
     await websocket.accept()
     availability = get_availability(settings.coordinator_available)
     coordinator_available = availability.available

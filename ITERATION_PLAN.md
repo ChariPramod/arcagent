@@ -24,9 +24,13 @@ Add a test-only logical-reply completion event after every utterance is acknowle
 
 The previous runner marked successful transport as a pass without checking qualification. Add a terminal extracted-field snapshot to the isolated protocol; compare expected outcome, handoff decision, and expected fields using the shared metrics; preserve missing evidence as a failure; save expectations and assessment reasons; return a failing CLI status for any failed scenario, including unsaved runs. Test through protocol, assessment, persisted results, and command orchestration. No owner-authored prompts/personas, external routing, or vendor parameters change.
 
-## Current iteration: record effective remote configuration and owner handoff
+## Completed iteration: record effective remote configuration and owner handoff
 
 Capture an allowlisted server configuration for each isolated audio session, including effective prompt hashes, model, scoring threshold, coordinator flag, speech parameters, turn settings, and source hashes. Require a valid handshake; treat CLI prompt/threshold labels as assertions; persist per-scenario evidence and reject mixed configurations as a passing run. Keep credentials and infrastructure addresses out. Record completed work, owner decisions/setup, remaining engineering, and acceptance gates in [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md). This is configuration evidence, not deterministic replay or a live latency claim.
+
+## Current iteration: enforce structural readiness
+
+Add offline preflight and shared prompt checks for missing, blank, placeholder, unreadable, or unsafe-version inputs. Gate voice setup and paid text/mutation entrypoints. Reject empty selected persona suites before caller/model work. Keep owner files untouched and use explicit temporary ready fixtures for tests. Structure passing is not semantic approval; no production bypass is added.
 
 ## Next iteration: establish a meaningful conversational baseline
 
@@ -70,3 +74,10 @@ CI follow-up: the first GitHub run exposed an overly short integration-fixture d
 Implemented the authenticated evaluation configuration event, strict schema validation, prompt/threshold assertions, per-scenario persisted metadata, server-derived run labels, and refusal to pass mixed or missing configurations. Captures effective speech/turn/model settings, cached prompt hashes, and on-disk server source hashes without environment secrets. This remains partial provenance, not a deterministic replay bundle; restart after source changes. Added [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md) with completed scope, independent owner inputs, credential/data/setup steps, engineering backlog, and staging gates.
 
 Final local verification: `592 passed, 1 skipped in 5.85s`; Ruff lint passed; `125 files already formatted`; `git diff --check` passed. No new dependencies, schema migrations, paid calls, imported real records, or cloud resources.
+
+
+## Structural readiness iteration verification
+
+Implemented cached prompt readiness checks, authenticated voice entrypoint rejection before vendor startup, text/mutation prompt gates, early empty-suite rejection, and `python -m evals.preflight`. No production bypass and no owner prompt/persona edits. Explicit temporary test fixtures preserve successful-path coverage. Current repository preflight correctly exits `2` with seven placeholder prompts and no selected personas.
+
+Final local verification: `614 passed, 1 skipped in 5.96s`; Ruff lint passed; `130 files already formatted`; `git diff --check` passed. No new dependencies, migrations, paid calls, or cloud resources.

@@ -52,7 +52,7 @@ class TestTwiml:
 
 
 class TestInboundWebhook:
-    def test_signed_request_gets_stream_twiml(self, client: TestClient) -> None:
+    def test_signed_request_gets_stream_twiml(self, client: TestClient, ready_prompts) -> None:
         url = f"{PUBLIC_URL}/voice/inbound"
         params = {"CallSid": "CA_test", "From": "+15551234567"}
         response = client.post("/voice/inbound", data=params, headers=_signed_headers(url, params))
@@ -81,7 +81,7 @@ class TestInboundWebhook:
         finally:
             app.dependency_overrides.clear()
 
-    def test_validation_can_be_disabled_for_local_development(self) -> None:
+    def test_validation_can_be_disabled_for_local_development(self, ready_prompts) -> None:
         settings = Settings(_env_file=None, public_url=PUBLIC_URL, validate_twilio_signature=False)
         app.dependency_overrides[get_settings] = lambda: settings
         try:
@@ -131,7 +131,9 @@ class TestStreamParameters:
     def test_no_parameters_produces_a_bare_stream(self) -> None:
         assert "<Parameter" not in connect_stream("wss://example.test/voice/stream")
 
-    def test_the_webhook_forwards_what_twilio_posted(self, client: TestClient) -> None:
+    def test_the_webhook_forwards_what_twilio_posted(
+        self, client: TestClient, ready_prompts
+    ) -> None:
         url = f"{PUBLIC_URL}/voice/inbound"
         params = {"CallSid": "CA_forwarded", "From": "+15551234567"}
         response = client.post("/voice/inbound", data=params, headers=_signed_headers(url, params))

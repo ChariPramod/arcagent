@@ -85,7 +85,9 @@ async def test_list_runs_without_keys_database_or_model(monkeypatch, capsys) -> 
     assert "mutation_hot__self_correction" in capsys.readouterr().out
 
 
-async def test_failed_mutations_return_nonzero_and_save_the_suite_snapshot(monkeypatch) -> None:
+async def test_failed_mutations_return_nonzero_and_save_the_suite_snapshot(
+    monkeypatch, ready_prompts
+) -> None:
     monkeypatch.setattr(
         "evals.mutations.get_settings", lambda: Settings(_env_file=None, llm_api_key="fixture")
     )

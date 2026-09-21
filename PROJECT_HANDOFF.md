@@ -30,6 +30,7 @@ Do not pay for a benchmark using the current placeholder prompts. Do not describ
 | Isolated audio tests | Dedicated authenticated test route, simulation provenance, no router/SMS/transfer actions | Synthetic tests cannot intentionally execute real routing through this route |
 | Complete reply boundaries | Acknowledges each audio chunk but waits for the logical reply; terminal replies stop the simulated caller | Prevents premature responses and terminal close races |
 | Audio grading | Expected outcome, handoff, and field checks; missing evidence fails; expectations and reasons saved | Transport success alone no longer passes an evaluation |
+| Input readiness | Offline preflight, required-prompt validation, empty-suite rejection, entrypoint guards | Detects missing/placeholder inputs; not semantic approval |
 | Command behavior | Failed audio cases produce a failing exit status, including `--no-db` | Evaluation failures can be used by automation |
 | Configuration provenance | Server-reported configuration and hashes, validation and persisted evidence | Records the configuration reported for an audio session; see the current testing guide for the exact contract |
 
@@ -81,7 +82,7 @@ You do not need to manually code the following backlog. These are engineering ta
 
 | Priority | Work | Acceptance evidence |
 |---|---|---|
-| Before paid benchmarks | Prompt readiness guard; complete a new reviewed prompt version; validate benchmark coverage | Placeholder or empty suites fail before vendor work; approved cases run |
+| Before paid benchmarks | Complete a new reviewed prompt version and validate coverage; structural readiness guard is implemented | Placeholder or empty suites fail before vendor work; approved cases run |
 | Before claiming reproducibility | Capture complete caller inputs and remaining remote/runtime provenance; compatibility rules for audio runs | Old/incomplete/mixed runs cannot receive a comparable-run verdict |
 | Before real routing | Explicit consent evidence, atomic Postgres slot claiming, idempotency, callback timezone handling | Concurrent bookings cannot double-claim; retry cannot duplicate actions |
 | Before claiming a handoff | Provider call status and coordinator-answer reconciliation, no-answer fallback | An accepted API request is distinguished from a person answering |
@@ -120,6 +121,14 @@ The Docker database uses a persistent named volume. The example database credent
 To inspect the website locally, follow `web/SETUP.md`. From `web/`, use the Node version in `package.json`, `npm ci`, then `npm run dev`. `/demo` stays fictional. `/workspace` is the connected view and needs its separate authorization/configuration.
 
 ### Second: complete prompts and personas, then establish the text baseline
+
+Run the offline diagnostic first:
+
+```bash
+.venv/bin/python -m evals.preflight --prompts v1 --json
+```
+
+Current owner files intentionally produce exit `2`: seven placeholder prompts and no selected personas. After preparing reviewed files, select the new version and rerun. Exit `0` verifies structure only. Protected execution paths reject placeholders without a bypass flag. Restart the backend after prompt edits to clear cached text.
 
 Do not proceed to model evaluation until the placeholder prompt and empty persona issues above are resolved. With reviewed inputs and credentials:
 
@@ -176,3 +185,6 @@ The next engineering work can continue without completing every checkbox. Creden
 ## Verification for this handoff
 
 Final local suite: `592 passed, 1 skipped in 5.85s`. Ruff lint passed; formatting reported `125 files already formatted`; `git diff --check` passed. The tests exercise synthetic transport, controlled model/vendor boundaries, and temporary databases. They do not establish live latency, real vendor account access, or suitability for actual patient calls. See the GitHub Actions run for the pushed commit for backend and website CI status.
+
+
+Latest readiness iteration: `614 passed, 1 skipped in 5.96s`; lint/formatting passed. The original owner prompt and persona gaps remain, but execution paths now reject them explicitly. Run the preflight command above to see the remaining input work without credentials or paid calls.

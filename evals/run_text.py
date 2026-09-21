@@ -13,6 +13,7 @@ import argparse
 import asyncio
 
 from arcagent.agent.llm import AnthropicStructuredLLM
+from arcagent.agent.readiness import PromptReadinessError, require_ready_prompts
 from arcagent.config import get_settings
 from arcagent.logging import configure_logging, get_logger
 from arcagent.persistence.db import session_scope
@@ -48,8 +49,10 @@ async def run(args: argparse.Namespace) -> int:
     settings = get_settings()
     if args.repeats < 1 or args.concurrency < 1:
         raise SystemExit("repeats and concurrency must be positive")
-    if not settings.llm_api_key:
-        raise SystemExit("LLM_API_KEY is not set. Put it in .env.")
+    try:
+        require_ready_prompts(args.prompts)
+    except PromptReadinessError as exc:
+        raise SystemExit(f"prompt readiness: {exc}") from exc
 
     try:
         personas = load_personas(groups=args.groups, ids=args.ids)
@@ -60,6 +63,9 @@ async def run(args: argparse.Namespace) -> int:
             "no personas found. evals/personas/ is owner authored and is currently empty; "
             "see evals/personas/README.md"
         )
+
+    if not settings.llm_api_key:
+        raise SystemExit("LLM_API_KEY is not set. Put it in .env.")
 
     agent_llm = AnthropicStructuredLLM(settings)
     caller_llm = AnthropicStructuredLLM(settings)

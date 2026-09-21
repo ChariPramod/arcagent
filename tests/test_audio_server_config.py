@@ -74,7 +74,7 @@ def test_hashes_follow_cached_prompts_and_source_contents(tmp_path, monkeypatch)
         load_prompt.cache_clear()
 
 
-def test_eval_config_precedes_vendor_start_and_is_absent_on_live_route(monkeypatch):
+def test_eval_config_precedes_vendor_start_and_is_absent_on_live_route(monkeypatch, ready_prompts):
     import pytest
     from fastapi.testclient import TestClient
 
@@ -116,7 +116,7 @@ def test_eval_config_precedes_vendor_start_and_is_absent_on_live_route(monkeypat
         app.dependency_overrides.clear()
 
 
-def test_snapshot_failure_closes_before_vendor_start(monkeypatch):
+def test_snapshot_failure_closes_before_vendor_start(monkeypatch, ready_prompts):
     from fastapi.testclient import TestClient
 
     from arcagent.app import app
@@ -127,7 +127,6 @@ def test_snapshot_failure_closes_before_vendor_start(monkeypatch):
         env="test",
         enable_audio_evals=True,
         audio_eval_token="fixture",
-        prompt_version="missing-fixture-version",
     )
     app.dependency_overrides[get_settings] = lambda: settings
     opened = []
@@ -136,6 +135,10 @@ def test_snapshot_failure_closes_before_vendor_start(monkeypatch):
         opened.append(True)
         raise AssertionError("snapshot failure must not open vendors")
 
+    def unavailable_snapshot(*args, **kwargs):
+        raise OSError("synthetic source snapshot failure")
+
+    monkeypatch.setattr("arcagent.app.build_eval_config", unavailable_snapshot)
     monkeypatch.setattr("arcagent.speech.deepgram_stt.DeepgramSTT.start", forbidden)
     try:
         with TestClient(app) as client:

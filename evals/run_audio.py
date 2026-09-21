@@ -333,6 +333,13 @@ async def run(args: argparse.Namespace) -> int:
         raise SystemExit(str(exc)) from exc
     if args.n < 1:
         raise SystemExit("Audio evaluation repeats must be positive")
+    try:
+        personas = load_personas(groups=args.groups, ids=args.ids)
+    except PersonaError as exc:
+        raise SystemExit(f"persona error: {exc}") from exc
+    if not personas:
+        raise SystemExit("no personas matched. evals/personas/ is owner authored.")
+
     for name, value in (
         ("AUDIO_EVAL_TOKEN", settings.audio_eval_token),
         ("CARTESIA_API_KEY", settings.cartesia_api_key),
@@ -347,13 +354,6 @@ async def run(args: argparse.Namespace) -> int:
             "warning: the caller and the agent are using the same voice. Pass "
             "--caller-voice so a recording is intelligible."
         )
-
-    try:
-        personas = load_personas(groups=args.groups, ids=args.ids)
-    except PersonaError as exc:
-        raise SystemExit(f"persona error: {exc}") from exc
-    if not personas:
-        raise SystemExit("no personas matched. evals/personas/ is owner authored.")
 
     caller_llm = AnthropicStructuredLLM(settings)
     results: list[AudioScenarioResult] = []

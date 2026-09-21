@@ -77,7 +77,7 @@ def test_production_cannot_disable_webhook_validation(settings):
 
 
 @pytest.mark.parametrize("failure", ["stt", "tts"])
-def test_startup_failure_closes_both_vendor_adapters(settings, monkeypatch, failure):
+def test_startup_failure_closes_both_vendor_adapters(settings, monkeypatch, failure, ready_prompts):
     closed = set()
 
     async def start_stt(self):
@@ -181,7 +181,9 @@ def test_eval_route_fails_closed_before_vendor_work(
     assert error.value.code == 1008
 
 
-def test_authorized_eval_reaches_pipeline_without_twilio_signature(settings, monkeypatch):
+def test_authorized_eval_reaches_pipeline_without_twilio_signature(
+    settings, monkeypatch, ready_prompts
+):
     settings.env = "test"
     settings.enable_audio_evals = True
     settings.audio_eval_token = "eval-secret"

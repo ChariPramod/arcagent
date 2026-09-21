@@ -19,6 +19,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from arcagent.agent.llm import AnthropicStructuredLLM, LLMResult, SchemaT, StructuredLLM
+from arcagent.agent.readiness import PromptReadinessError, require_ready_prompts
 from arcagent.config import get_settings
 from arcagent.logging import configure_logging
 from evals.persona import Persona
@@ -137,6 +138,10 @@ async def run(args: argparse.Namespace) -> int:
         raise SystemExit("--run-name is required unless using --list")
     if args.repeats < 1:
         raise SystemExit("repeats must be positive")
+    try:
+        require_ready_prompts(args.prompts)
+    except PromptReadinessError as exc:
+        raise SystemExit(f"prompt readiness: {exc}") from exc
     if not settings.llm_api_key:
         raise SystemExit("LLM_API_KEY is required to evaluate mutations; --list runs offline")
     snapshot = await asyncio.to_thread(

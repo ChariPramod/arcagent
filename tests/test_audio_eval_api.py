@@ -28,7 +28,7 @@ from tests.test_graph_transitions import HOT_LEAD, MockLLM
     ],
 )
 def test_audio_eval_completes_and_persists_simulation_without_external_actions(
-    tmp_path, monkeypatch, threshold, expected, disconnect
+    tmp_path, monkeypatch, threshold, expected, disconnect, ready_prompts
 ):
     reset_availability()
     evaluation = expected != "abandoned"

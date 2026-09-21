@@ -66,6 +66,7 @@ def test_snapshot_rejects_nonpositive_run_limits(field: str) -> None:
 
 async def test_text_entrypoint_records_inputs_before_calls_and_uses_availability(
     monkeypatch,
+    ready_prompts,
 ) -> None:
     from argparse import Namespace
 
