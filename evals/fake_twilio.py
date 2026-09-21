@@ -115,6 +115,18 @@ class FakeTwilioCall:
     async def _send(self, message: dict[str, Any]) -> None:
         await self.socket.send(json.dumps(message))
 
+    async def wait_for_config(self, wait_s: float = 5.0) -> dict[str, Any]:
+        """Require a validated server configuration before starting synthetic audio."""
+        async with asyncio.timeout(wait_s):
+            message = await self._inbox.get()
+        if message is None:
+            raise ConnectionError("Evaluation stream closed before configuration")
+        if not isinstance(message, dict) or message.get("event") != "eval.config":
+            raise ValueError("Expected evaluation server configuration")
+        from arcagent.telephony.eval_config import AudioServerConfig
+
+        return AudioServerConfig.model_validate(message.get("config")).model_dump(mode="json")
+
     async def start(self) -> None:
         """The connected and start events, carrying the call sid the app expects."""
         await self._send({"event": "connected", "protocol": "Call", "version": "1.0.0"})

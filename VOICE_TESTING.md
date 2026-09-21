@@ -62,6 +62,10 @@ In a second terminal configured for the same test environment:
   --groups hot_buyers --n 1
 ```
 
+Before starting a simulated call, the client requires a versioned `eval.config` event. It validates an allowlist of effective server settings, hashes of the cached prompts, and hashes of server Python source files. The snapshot covers the model, token limit, scoring threshold, captured coordinator availability, speech configuration, and turn settings. Credentials, phone numbers, infrastructure URLs, and database settings are excluded.
+
+`--prompts` and `--threshold` assert the server settings; they do not change the remote server. A mismatch or missing/malformed configuration fails the scenario. Saved run labels come from verified server metadata. A run containing different server configurations fails and is labeled `mixed`, with threshold `-1` as an unavailable sentinel; per-scenario snapshots remain available for inspection. Runs with no valid configuration use `unverified`, also with threshold `-1`.
+
 The client sends the evaluation credential in a header. It refuses the live voice path, credentials or tokens embedded in URLs, query strings, and unencrypted non-loopback URLs. Remote evaluation requires WSS and a separately deployed test server. The route never invokes `CallRouter`, reserves slots, transfers calls, or sends SMS. Its call outcome is a simulated graph/session outcome.
 
 The harness waits for the freshly acknowledged agent turn to appear in the database, rather than feeding its caller model stale transcript text. Incomplete audio or missing committed conversation state must be reported as failures. Per-scenario infrastructure errors should leave an inspectable result without disclosing credentials or raw exception payloads.
@@ -82,7 +86,7 @@ The fake Twilio client acknowledges received frames and marks. It is not a phone
 
 An audio result passes only with a complete terminal snapshot, at least one caller turn, no transport/persistence error, the expected outcome and handoff decision, and all compared expected fields matching. Fields listed in `not_expected` are excluded using the shared text-evaluation rules. Missing snapshots fail even when no fields are expected. Saved results include expectations, extracted fields, field accuracy, and fixed failure reason codes; treat these artifacts as sensitive test data. `--no-db` skips saving evaluation results but still reads the call database. Both saved and unsaved runs exit unsuccessfully when any scenario fails.
 
-Independent audio review, complete remote configuration snapshots, reviewed scenario coverage, and real-phone probes remain necessary before using audio results as a deployment gate. The server snapshot is its structured extraction, not an independent transcription of the audio. The harness still does not verify that its local prompt/threshold labels match the remote server; use matching configuration and do not treat those labels as provenance. The existing text benchmark retains its stricter compatibility checks and guarded metrics.
+Independent audio review, complete remote configuration snapshots, reviewed scenario coverage, and real-phone probes remain necessary before using audio results as a deployment gate. The server snapshot is its structured extraction, not an independent transcription of the audio. The configuration handshake checks prompt-version and threshold assertions and captures server hashes. It is not a full replay bundle: prompt content, caller inputs/settings, dependency/runtime versions, and remote vendor revisions are not all captured by this audio protocol. Source hashes describe files on disk; restart the evaluation server after code changes so they correspond to the loaded code. Cached prompt hashes describe the actual strings used by the graph. The existing text benchmark retains its stricter compatibility checks and guarded metrics.
 
 ## Routing outcomes
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Form, Response, WebSocket
@@ -19,6 +20,7 @@ from arcagent.speech.cartesia_tts import CartesiaTTS
 from arcagent.speech.deepgram_stt import DeepgramSTT
 from arcagent.telephony.availability import CoordinatorAvailability, get_availability
 from arcagent.telephony.call_session import CallSession
+from arcagent.telephony.eval_config import build_eval_config
 from arcagent.telephony.persistence_sink import DatabaseTurnSink
 from arcagent.telephony.routing import CallRouter
 from arcagent.telephony.security import (
@@ -108,6 +110,15 @@ async def _run_voice_session(
 ) -> None:
     await websocket.accept()
     availability = get_availability(settings.coordinator_available)
+    coordinator_available = availability.available
+    if evaluation:
+        try:
+            snapshot = await asyncio.to_thread(build_eval_config, settings, coordinator_available)
+        except Exception as exc:
+            log.warning("audio_eval_config_failed", error_type=type(exc).__name__)
+            await websocket.close(code=1011, reason="evaluation configuration unavailable")
+            return
+        await websocket.send_json({"event": "eval.config", "config": snapshot})
 
     stt = DeepgramSTT(settings)
     tts = CartesiaTTS(settings)
@@ -117,7 +128,7 @@ async def _run_voice_session(
             llm=AnthropicStructuredLLM(settings),
             prompt_version=settings.prompt_version,
             threshold=settings.handoff_threshold,
-            coordinator_available=availability.available,
+            coordinator_available=coordinator_available,
         )
     )
 

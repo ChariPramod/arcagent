@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from arcagent.config import Settings
 from arcagent.persistence.db import get_engine, session_scope
 from arcagent.persistence.models import Base, EvalResult, EvalRun, Tier
+from arcagent.telephony.eval_config import build_eval_config
 from evals import run_audio
 from evals.persona import Expected, Persona
 from tests.fakes import FakeTtsSocket
@@ -54,6 +55,8 @@ def quality_cli(tmp_path, monkeypatch):
 
         async def scenario(**kwargs):
             case = next(pending)
+            assert kwargs["requested_prompt_version"] == "v1"
+            assert kwargs["requested_threshold"] == 60
             return run_audio.AudioScenarioResult(
                 scenario_id=persona.id,
                 group="hot_buyers",
@@ -67,6 +70,7 @@ def quality_cli(tmp_path, monkeypatch):
                 error="Synthetic transport error" if case == "error" else None,
                 expected=None if case == "missing_expectations" else expected,
                 actual_fields=None if case == "missing_snapshot" else {"name": "Pat"},
+                remote_config=build_eval_config(settings, case != "server_changed"),
             )
 
         monkeypatch.setattr(run_audio, "run_audio_scenario", scenario)
@@ -147,3 +151,32 @@ def test_one_failed_repeat_makes_the_entire_cli_run_fail(quality_cli, monkeypatc
     with pytest.raises(SystemExit) as exited:
         run_audio.main()
     assert exited.value.code == 1
+
+
+async def test_changed_server_configuration_fails_whole_cli_run(quality_cli):
+    url, scripted_results = quality_cli
+    scripted_results("success", "server_changed")
+    status = await run_audio.run(
+        Namespace(
+            run_name="changed",
+            stream_url=run_audio.DEFAULT_STREAM_URL,
+            n=2,
+            groups=["hot_buyers"],
+            ids=None,
+            prompts="v1",
+            threshold=60,
+            caller_voice="caller",
+            no_db=False,
+        )
+    )
+    assert status == 1
+    with session_scope(url) as session:
+        run = session.scalar(select(EvalRun))
+        assert run.prompt_version == "mixed"
+        assert run.threshold == -1
+        rows = session.scalars(select(EvalResult)).all()
+        assert all(not row.passed and "server_config_mixed" in row.notes for row in rows)
+        assert [row.actual["server_config"]["coordinator_available"] for row in rows] == [
+            True,
+            False,
+        ]

@@ -51,6 +51,12 @@ class EvaluationServerSocket:
         self.completion = completion
         self.mismatch = mismatch
         self.inbox = asyncio.Queue()
+        from arcagent.config import Settings
+        from arcagent.telephony.eval_config import build_eval_config
+
+        self.emit(
+            {"event": "eval.config", "config": build_eval_config(Settings(_env_file=None), True)}
+        )
         self.call_id = None
         self.terminal_sent = False
         self.acknowledged = []

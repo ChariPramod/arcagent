@@ -20,9 +20,13 @@ Test seams chosen under the user's authorization: HTTP/WebSocket endpoints; Call
 
 Add a test-only logical-reply completion event after every utterance is acknowledged. The client acknowledges individual marks while accumulating the entire reply; the runner checks committed transcript text, invokes the caller once, and stops before generating a response to terminal speech. Missing completion, malformed events, interrupted output, and premature socket closure must fail explicitly. Use the existing session, WebSocket transport, and evaluation-runner seams. Keep the live Twilio protocol unchanged. Status: implemented and verified. Terminal completion is recorded before exposing the event, so an immediate client disconnect cannot reclassify completed playback as abandoned.
 
-## Current iteration: grade audio conversation quality
+## Completed iteration: grade audio conversation quality
 
 The previous runner marked successful transport as a pass without checking qualification. Add a terminal extracted-field snapshot to the isolated protocol; compare expected outcome, handoff decision, and expected fields using the shared metrics; preserve missing evidence as a failure; save expectations and assessment reasons; return a failing CLI status for any failed scenario, including unsaved runs. Test through protocol, assessment, persisted results, and command orchestration. No owner-authored prompts/personas, external routing, or vendor parameters change.
+
+## Current iteration: record effective remote configuration and owner handoff
+
+Capture an allowlisted server configuration for each isolated audio session, including effective prompt hashes, model, scoring threshold, coordinator flag, speech parameters, turn settings, and source hashes. Require a valid handshake; treat CLI prompt/threshold labels as assertions; persist per-scenario evidence and reject mixed configurations as a passing run. Keep credentials and infrastructure addresses out. Record completed work, owner decisions/setup, remaining engineering, and acceptance gates in [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md). This is configuration evidence, not deterministic replay or a live latency claim.
 
 ## Next iteration: establish a meaningful conversational baseline
 
@@ -59,3 +63,10 @@ Implemented terminal field snapshots, independent persona-based grading, persist
 Final local verification: `pytest -q` reported `573 passed, 1 skipped in 4.67s`; `ruff check .` passed; `ruff format --check .` reported `121 files already formatted`; `git diff --check` passed. No dependencies or schema migrations were added, and no paid API calls or cloud resources were used. Remote configuration provenance, prompt/persona completeness, independent audio review, and actual telephony measurements remain outstanding.
 
 CI follow-up: the first GitHub run exposed an overly short integration-fixture deadline during cold SQLite/transport work. Increased only the successful-scenario test deadline, retained the short intentional missing-completion timeout, and left application timeouts unchanged. Local recheck: `573 passed, 1 skipped in 5.60s`; lint and formatting passed.
+
+
+## Remote configuration and handoff verification
+
+Implemented the authenticated evaluation configuration event, strict schema validation, prompt/threshold assertions, per-scenario persisted metadata, server-derived run labels, and refusal to pass mixed or missing configurations. Captures effective speech/turn/model settings, cached prompt hashes, and on-disk server source hashes without environment secrets. This remains partial provenance, not a deterministic replay bundle; restart after source changes. Added [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md) with completed scope, independent owner inputs, credential/data/setup steps, engineering backlog, and staging gates.
+
+Final local verification: `592 passed, 1 skipped in 5.85s`; Ruff lint passed; `125 files already formatted`; `git diff --check` passed. No new dependencies, schema migrations, paid calls, imported real records, or cloud resources.

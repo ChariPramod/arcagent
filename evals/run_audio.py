@@ -28,6 +28,7 @@ from arcagent.persistence.db import session_scope
 from arcagent.persistence.models import Call, Tier, Turn
 from arcagent.persistence.repo import EvalRepository
 from arcagent.speech.cartesia_tts import CartesiaTTS
+from arcagent.telephony.eval_config import AudioServerConfig
 from evals import metrics
 from evals.audio_scoring import AudioAssessment, assess_audio
 from evals.fake_twilio import FakeTwilioCall, validate_eval_url
@@ -58,6 +59,7 @@ class AudioScenarioResult:
     error: str | None = None
     expected: Expected | None = None
     actual_fields: dict[str, Any] | None = None
+    remote_config: dict[str, Any] | None = None
 
     @property
     def assessment(self) -> AudioAssessment | None:
@@ -66,9 +68,16 @@ class AudioScenarioResult:
         return assess_audio(self.expected, self.actual_fields, self.outcome, self.error, self.turns)
 
     @property
+    def verified_config(self) -> dict[str, Any] | None:
+        try:
+            return AudioServerConfig.model_validate(self.remote_config).model_dump(mode="json")
+        except ValueError:
+            return None
+
+    @property
     def passed(self) -> bool:
         assessment = self.assessment
-        return assessment is not None and assessment.passed
+        return self.verified_config is not None and assessment is not None and assessment.passed
 
 
 async def synthesize(tts: CartesiaTTS, text: str, voice_id: str) -> bytes:
@@ -90,6 +99,8 @@ async def run_audio_scenario(
     auth_token: str = "",
     agent_wait_s: float = 20.0,
     persistence_wait_s: float = 5.0,
+    requested_prompt_version: str | None = None,
+    requested_threshold: int | None = None,
 ) -> AudioScenarioResult:
     """Play one persona down a real WebSocket and read the latency back from the database."""
     caller = SimulatedCaller(persona=persona, llm=caller_llm)
@@ -99,9 +110,20 @@ async def run_audio_scenario(
     stages: dict[str, list[int]] = {}
     outcome: str | None = None
     actual_fields: dict[str, Any] | None = None
+    remote_config: dict[str, Any] | None = None
     phase = "connection"
     try:
         async with call:
+            phase = "server configuration"
+            remote_config = await call.wait_for_config(wait_s=persistence_wait_s)
+            if (
+                requested_prompt_version is not None
+                and remote_config["prompt_version"] != requested_prompt_version
+            ) or (
+                requested_threshold is not None
+                and remote_config["threshold"] != requested_threshold
+            ):
+                raise ValueError
             phase = "stream start"
             await call.start()
             last_agent_index = -1
@@ -159,6 +181,7 @@ async def run_audio_scenario(
         error=error,
         expected=persona.expected.model_copy(deep=True),
         actual_fields=actual_fields,
+        remote_config=remote_config,
     )
 
 
@@ -288,8 +311,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--groups", nargs="*", default=["hot_buyers"])
     parser.add_argument("--ids", nargs="*", default=None)
     parser.add_argument("--n", type=int, default=1, help="repeats per persona")
-    parser.add_argument("--prompts", default=settings.prompt_version)
-    parser.add_argument("--threshold", type=int, default=settings.handoff_threshold)
+    parser.add_argument(
+        "--prompts", default=settings.prompt_version, help="assert the remote server prompt version"
+    )
+    parser.add_argument(
+        "--threshold",
+        type=int,
+        default=settings.handoff_threshold,
+        help="assert the remote server handoff threshold",
+    )
     parser.add_argument("--caller-voice", default=None, help="Cartesia voice id for the caller")
     parser.add_argument("--no-db", action="store_true")
     return parser.parse_args()
@@ -342,6 +372,8 @@ async def run(args: argparse.Namespace) -> int:
                     caller_voice_id=caller_voice,
                     repeat_index=repeat,
                     auth_token=settings.audio_eval_token,
+                    requested_prompt_version=args.prompts,
+                    requested_threshold=args.threshold,
                 )
                 results.append(result)
                 assessment = result.assessment
@@ -353,6 +385,9 @@ async def run(args: argparse.Namespace) -> int:
                     + (f"  error={result.error}" if result.error else "")
                 )
 
+    _, _, provenance = enforce_server_configuration(results)
+    if provenance != "verified":
+        print(f"server configuration: {provenance}; this run cannot pass")
     print(format_latency(results))
     if not args.no_db:
         run_id = write_results(args, results, git_sha())
@@ -360,20 +395,42 @@ async def run(args: argparse.Namespace) -> int:
     return 0 if results and all(result.passed for result in results) else 1
 
 
+def enforce_server_configuration(results: list[AudioScenarioResult]) -> tuple[str, int, str]:
+    """Keep diagnostics but invalidate a batch whose effective server inputs changed."""
+    configs = [result.verified_config for result in results]
+    verified = [config for config in configs if config is not None]
+    mixed = bool(verified) and any(config != verified[0] for config in verified[1:])
+    for result, config in zip(results, configs, strict=True):
+        reason = (
+            "server_config_mixed" if mixed else "server_config_missing" if config is None else None
+        )
+        if reason is not None and reason not in (result.error or ""):
+            result.error = "; ".join(filter(None, (result.error, reason)))
+    if mixed:
+        return "mixed", -1, "mixed"
+    if not verified or len(verified) != len(results):
+        return "unverified", -1, "unverified"
+    return verified[0]["prompt_version"], verified[0]["threshold"], "verified"
+
+
 def write_results(args: argparse.Namespace, results: list[AudioScenarioResult], sha: str) -> int:
+    prompt_version, threshold, provenance = enforce_server_configuration(results)
     with session_scope() as session:
         repo = EvalRepository(session)
         run_row = repo.create_run(
             run_name=args.run_name,
             git_sha=sha,
-            prompt_version=args.prompts,
-            threshold=args.threshold,
+            prompt_version=prompt_version,
+            threshold=threshold,
             tier=Tier.AUDIO,
+            snapshot={"suite": "audio", "server_config_status": provenance},
         )
         for result in results:
             error = result.error
-            if error is None and (result.outcome is None or result.turns == 0):
-                error = "No completed audio conversation was recorded"
+            if result.outcome is None or result.turns == 0:
+                incomplete = "No completed audio conversation was recorded"
+                if incomplete not in (error or ""):
+                    error = "; ".join(filter(None, (error, incomplete)))
             assessment = result.assessment
             reasons = assessment.reasons if assessment is not None else ("missing_expectations",)
             notes = "; ".join(filter(None, (error, *reasons))) or None
@@ -391,6 +448,7 @@ def write_results(args: argparse.Namespace, results: list[AudioScenarioResult], 
                 actual={
                     "outcome": result.outcome,
                     "fields": result.actual_fields,
+                    "server_config": result.verified_config,
                     "assessment": {
                         "outcome_correct": assessment.outcome_correct,
                         "handoff_correct": assessment.handoff_correct,

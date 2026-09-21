@@ -4,9 +4,11 @@ import asyncio
 
 import pytest
 
+from arcagent.config import Settings
 from arcagent.persistence.db import get_engine, session_scope
 from arcagent.persistence.models import Base, Outcome
 from arcagent.persistence.repo import CallRepository
+from arcagent.telephony.eval_config import build_eval_config
 from evals import run_audio
 
 
@@ -102,6 +104,14 @@ async def test_absent_or_unmarked_agent_audio_fails(monkeypatch, payloads):
     class Socket:
         def __init__(self):
             self.messages = asyncio.Queue()
+            self.messages.put_nowait(
+                json.dumps(
+                    {
+                        "event": "eval.config",
+                        "config": build_eval_config(Settings(_env_file=None), True),
+                    }
+                )
+            )
             for audio in payloads:
                 self.messages.put_nowait(
                     json.dumps(
@@ -155,6 +165,14 @@ async def test_scenario_waits_for_ack_and_finalization_commits(
     class Socket:
         def __init__(self):
             self.messages = asyncio.Queue()
+            self.messages.put_nowait(
+                json.dumps(
+                    {
+                        "event": "eval.config",
+                        "config": build_eval_config(Settings(_env_file=None), True),
+                    }
+                )
+            )
             self.call_id = None
 
         async def send(self, raw):
