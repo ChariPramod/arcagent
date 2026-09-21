@@ -353,3 +353,137 @@ class TestPlaybackAccounting:
         await harness.stop()
         assert harness.session.outcome == "abandoned"
         assert harness.turns[-1].interrupted
+
+
+class TestReplyCompletion:
+    async def test_complete_reply_waits_for_all_chunks_and_persisted_turns(self) -> None:
+        class ChunkedResponder(ScriptedResponder):
+            async def respond(self, transcript):
+                if transcript:
+                    yield "first chunk"
+                    yield "second chunk"
+
+        harness = build_harness(ChunkedResponder())
+        completions = []
+
+        async def completed(texts, terminal):
+            completions.append((texts, terminal, [t.text for t in harness.turns]))
+
+        harness.session.on_reply_complete = completed
+        await harness.start()
+        try:
+            await harness.caller_says("question")
+            marks = harness.twilio.sent_of("mark")
+            assert len(marks) == 2
+            assert completions == []
+            harness.twilio.push(mark_message(marks[0]["mark"]["name"]))
+            await harness.settle()
+            assert completions == []
+            harness.twilio.push(mark_message(marks[1]["mark"]["name"]))
+            await harness.settle()
+            assert completions == [
+                (
+                    ["first chunk", "second chunk"],
+                    False,
+                    ["question", "first chunk", "second chunk"],
+                )
+            ]
+        finally:
+            await harness.stop()
+
+    async def test_interrupted_reply_never_reports_completion(self) -> None:
+        harness = build_harness(ScriptedResponder(["first reply", "second reply"]))
+        completions = []
+
+        async def completed(texts, terminal):
+            completions.append((texts, terminal))
+
+        harness.session.on_reply_complete = completed
+        await harness.start()
+        try:
+            await harness.caller_says("first question")
+            first_mark = harness.twilio.sent_of("mark")[0]["mark"]["name"]
+            await harness.caller_says("second question")
+            second_mark = harness.twilio.sent_of("mark")[1]["mark"]["name"]
+            harness.twilio.push(mark_message(first_mark))
+            await harness.settle()
+            assert completions == []
+            harness.twilio.push(mark_message(second_mark))
+            await harness.settle()
+            assert completions == [(["second reply"], False)]
+        finally:
+            await harness.stop()
+
+    async def test_terminal_reply_reports_completion_before_ending(self) -> None:
+        responder = ScriptedResponder(["goodbye"])
+        harness = build_harness(responder)
+        completions = []
+
+        async def completed(texts, terminal):
+            completions.append((texts, terminal, harness.session.state))
+
+        harness.session.on_reply_complete = completed
+        await harness.start()
+        try:
+            responder.should_end = True
+            await harness.caller_says("bye")
+            harness.twilio.push(mark_message(harness.twilio.sent_of("mark")[0]["mark"]["name"]))
+            assert await harness.wait_until(lambda: harness.session.state is SessionState.ENDING)
+            assert completions == [(["goodbye"], True, SessionState.LISTENING)]
+        finally:
+            await harness.stop()
+
+    async def test_silence_goodbye_reports_terminal_completion_after_playback(self) -> None:
+        from arcagent.agent.edge_cases import SILENCE_GOODBYE
+        from tests.test_barge_in import FakeClock, settings
+
+        clock = FakeClock()
+        harness = build_harness(
+            ScriptedResponder(), settings=settings(silence_hangup_s=15), clock=clock
+        )
+        completions = []
+
+        async def completed(texts, terminal):
+            completions.append((texts, terminal))
+
+        harness.session.on_reply_complete = completed
+        await harness.start()
+        try:
+            clock.advance(16)
+            assert await harness.wait_until(lambda: bool(harness.twilio.sent_of("mark")))
+            assert completions == []
+            harness.twilio.push(mark_message(harness.twilio.sent_of("mark")[0]["mark"]["name"]))
+            assert await harness.wait_until(lambda: harness.session.state is SessionState.ENDING)
+            assert completions == [([SILENCE_GOODBYE], True)]
+        finally:
+            await harness.stop()
+
+    async def test_disconnect_after_terminal_completion_does_not_abandon_completed_call(
+        self,
+    ) -> None:
+        import asyncio
+
+        responder = ScriptedResponder(["goodbye"])
+        harness = build_harness(responder)
+        callback_started = asyncio.Event()
+
+        async def completed(texts, terminal):
+            assert texts == ["goodbye"] and terminal
+            callback_started.set()
+            # A real socket send may yield while the remote sees completion and closes.
+            harness.twilio.push(stop_message())
+            await asyncio.Event().wait()
+
+        harness.session.on_reply_complete = completed
+        await harness.start()
+        try:
+            responder.should_end = True
+            await harness.caller_says("bye")
+            harness.twilio.push(mark_message(harness.twilio.sent_of("mark")[0]["mark"]["name"]))
+            assert await harness.wait_until(callback_started.is_set)
+            assert await harness.wait_until(lambda: harness.session.state is SessionState.ENDING)
+            assert harness.session.outcome is None
+            assert harness.turns[-1].text == "goodbye"
+            assert not harness.turns[-1].interrupted
+        finally:
+            await harness.stop()

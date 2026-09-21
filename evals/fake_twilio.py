@@ -1,6 +1,6 @@
 """A fake Twilio Media Streams client.
 
-Speaks the Twilio side of the protocol against the real ``/voice/stream`` handler, so
+Speaks the Twilio side of the protocol against the isolated ``/eval/voice/stream`` handler, so
 tier 2 exercises the actual WebSocket code path, the actual STT, and the actual barge in
 logic. Only the phone network is missing.
 
@@ -42,6 +42,15 @@ class ReceivedAudio:
         return len(self.frames) * REAL_TIME_FRAME_S
 
 
+@dataclass
+class ReceivedReply:
+    """A whole logical evaluation reply, delivered and acknowledged before completion."""
+
+    frames: list[bytes]
+    texts: list[str]
+    terminal: bool
+
+
 class FakeTwilioCall:
     """One call, over a real WebSocket, against a running server.
 
@@ -50,7 +59,7 @@ class FakeTwilioCall:
         async with FakeTwilioCall(url, call_sid, from_number) as call:
             await call.start()
             await call.play(mulaw_audio)
-            audio = await call.wait_for_agent()
+            reply = await call.wait_for_reply()
     """
 
     def __init__(
@@ -73,7 +82,7 @@ class FakeTwilioCall:
         self.frames_sent = 0
         self.cleared = 0
         self._reader: asyncio.Task[None] | None = None
-        self._inbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._inbox: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
     async def __aenter__(self) -> FakeTwilioCall:
         import websockets
@@ -99,6 +108,8 @@ class FakeTwilioCall:
                     log.warning("fake_twilio_unparsed_message")
         except Exception:
             pass
+        finally:
+            self._inbox.put_nowait(None)
 
     async def _send(self, message: dict[str, Any]) -> None:
         await self.socket.send(json.dumps(message))
@@ -158,7 +169,7 @@ class FakeTwilioCall:
         await self.play(bytes([0xFF]) * int(8000 * seconds))
 
     async def wait_for_agent(self, wait_s: float = 20.0) -> ReceivedAudio:
-        """Collect agent audio until its mark arrives, which means it finished speaking.
+        """Collect one marked utterance. A mark does not delimit the entire logical reply.
 
         Named ``wait_s`` rather than ``timeout`` deliberately: a caller reaching for
         ``asyncio.timeout`` around this would cancel mid utterance and lose the frames
@@ -174,6 +185,8 @@ class FakeTwilioCall:
             except TimeoutError:
                 break
 
+            if message is None:
+                break
             match message.get("event"):
                 case "media":
                     if received.first_frame_at is None:
@@ -196,9 +209,74 @@ class FakeTwilioCall:
                     return received
         return received
 
+    async def wait_for_reply(self, wait_s: float = 20.0) -> ReceivedReply:
+        """Acknowledge utterances immediately; wait for the server's logical boundary.
+
+        Evaluation-only completion metadata is emitted after server persistence. Marks
+        still acknowledge synthetic delivery, not real telephone playback duration.
+        """
+        frames: list[bytes] = []
+        pending_frames = 0
+        acknowledged = 0
+        seen_marks: set[str] = set()
+        async with asyncio.timeout(wait_s):
+            while True:
+                message = await self._inbox.get()
+                if message is None:
+                    raise ConnectionError("Evaluation stream closed before reply completion")
+                if not isinstance(message, dict):
+                    raise ValueError("Invalid evaluation stream event")
+                match message.get("event"):
+                    case "media":
+                        audio = base64.b64decode(message["media"]["payload"], validate=True)
+                        if not audio:
+                            raise ValueError("Empty evaluation audio frame")
+                        frames.append(audio)
+                        pending_frames += 1
+                    case "mark":
+                        name = message["mark"]["name"]
+                        if not isinstance(name, str) or not name:
+                            raise ValueError("Invalid evaluation audio mark")
+                        await self._send(
+                            {
+                                "event": "mark",
+                                "streamSid": self.stream_sid,
+                                "mark": {"name": name},
+                            }
+                        )
+                        if name not in seen_marks and pending_frames:
+                            acknowledged += 1
+                            pending_frames = 0
+                        seen_marks.add(name)
+                    case "clear":
+                        self.cleared += 1
+                        frames = []
+                        pending_frames = 0
+                        acknowledged = 0
+                    case "eval.reply_complete":
+                        reply = message.get("reply")
+                        if not isinstance(reply, dict):
+                            raise ValueError("Invalid evaluation reply completion")
+                        texts = reply.get("texts")
+                        terminal = reply.get("terminal")
+                        if (
+                            not isinstance(texts, list)
+                            or not texts
+                            or any(not isinstance(text, str) or not text.strip() for text in texts)
+                            or type(terminal) is not bool
+                            or not frames
+                            or pending_frames
+                            or acknowledged != len(texts)
+                        ):
+                            raise ValueError("Invalid evaluation reply completion")
+                        return ReceivedReply(frames, texts, terminal)
+
     async def stream_events(self) -> AsyncIterator[dict[str, Any]]:
         while True:
-            yield await self._inbox.get()
+            message = await self._inbox.get()
+            if message is None:
+                return
+            yield message
 
     async def hangup(self) -> None:
         try:

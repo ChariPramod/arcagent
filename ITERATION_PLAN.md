@@ -2,7 +2,7 @@
 
 Started September 20, 2026. Continues the data/cloud/validation playbook. The user authorized choosing priorities, delegating work, and implementing them.
 
-## Current iteration: make controlled voice testing trustworthy
+## Completed iteration: make controlled voice testing trustworthy
 
 Deliverable: a safer backend and a regression suite that can establish what happened in a conversation before optimizing or deploying it.
 
@@ -12,13 +12,17 @@ Deliverable: a safer backend and a regression suite that can establish what happ
 | Caller turn integrity | Preserve finalized segments; flush once at endpoint or utterance end | Scripted call sessions deliver the entire utterance without duplicates | Implemented |
 | Playback lifecycle and timing | Associate writer/mark events with the correct utterance; finish terminal audio before teardown | Delayed marks and cancellation do not corrupt another turn's measurements | Implemented |
 | Truthful routing | Distinguish failed callback booking from a saved callback whose SMS failed | No claimed booking without a slot, no unintended SMS, persistence errors reported | Implemented |
-| Safe audio evaluation | Keep synthetic transport authenticated and prevent real routing effects; stop presenting playback completion as response latency | Explicit isolated mode, refusal by default, no Twilio actions from synthetic calls | Implemented; response-boundary limitation below |
+| Safe audio evaluation | Keep synthetic transport authenticated and prevent real routing effects; stop presenting playback completion as response latency | Explicit isolated mode, refusal by default, no Twilio actions from synthetic calls | Implemented; reply boundary added in next iteration |
 
 Test seams chosen under the user's authorization: HTTP/WebSocket endpoints; CallSession events to responder, persisted turn and outbound audio; CallRouter results and external actions; audio harness to authenticated test transport. Use one failing behavioral test followed by the implementation, then repeat. Mock vendor/network boundaries, not the algorithm being asserted.
 
+## Current iteration: complete reply boundaries in audio evaluation
+
+Add a test-only logical-reply completion event after every utterance is acknowledged. The client acknowledges individual marks while accumulating the entire reply; the runner checks committed transcript text, invokes the caller once, and stops before generating a response to terminal speech. Missing completion, malformed events, interrupted output, and premature socket closure must fail explicitly. Use the existing session, WebSocket transport, and evaluation-runner seams. Keep the live Twilio protocol unchanged. Status: implemented and verified. Terminal completion is recorded before exposing the event, so an immediate client disconnect cannot reclassify completed playback as abandoned.
+
 ## Next iteration: establish a meaningful conversational baseline
 
-First add logical-response completion signaling to the isolated audio protocol, including multi-utterance terminal replies. Then complete a new prompt version and independent labeled cases, without rewriting owner-authored originals. Verify disclosure and prohibited claims, consent evidence, language fallback, caller number correction, coordinator no-answer, confirmed routing status, and timezone-correct callbacks. Replace placeholder prompt use with an explicit readiness check. Add live vendor smoke checks only after credentials and a spending budget are available.
+Complete a new prompt version and independent labeled cases, without rewriting owner-authored originals. Verify disclosure and prohibited claims, consent evidence, language fallback, caller number correction, coordinator no-answer, confirmed routing status, and timezone-correct callbacks. Replace placeholder prompt use with an explicit readiness check. Add live vendor smoke checks only after credentials and a spending budget are available.
 
 ## Following iteration: measure, then optimize
 
@@ -34,6 +38,11 @@ Implemented the current workstreams through separate endpoint, turn-integrity, r
 
 The regression suite covers authentication before vendor startup, partial vendor startup cleanup, actual graph/session/database simulation without external actions, multi-segment caller speech, interruption and delayed/cleared marks, bounded missing acknowledgements, synthesis failure, callback booking failures, database errors, and delayed evaluation persistence.
 
-Remaining blockers are explicit: the audio caller still treats utterance marks as reply boundaries; prompt/persona completion, consent evidence, concurrent slot claiming, confirmed human handoffs, independent outcome scoring, and real speech-end-to-audio latency probes need further implementation. Offline passes establish tested software behavior, not clinical suitability or real-call performance.
+Remaining blockers after the first iteration included reply boundaries, now handled by the second iteration. Prompt/persona completion, consent evidence, concurrent slot claiming, confirmed human handoffs, independent outcome scoring, and real speech-end-to-audio latency probes need further implementation. Offline passes establish tested software behavior, not clinical suitability or real-call performance.
 
 Final local verification: `ruff check .` passed; `ruff format --check .` reported `116 files already formatted`; `pytest -q` reported `519 passed, 1 skipped in 2.98s`; `git diff --check` passed. Integration review also added guards for partial disconnect and disconnect before final audio acknowledgement, verified against the real graph/session/database path without external actions.
+
+
+## Reply-boundary iteration verification
+
+`pytest -q`: `546 passed, 1 skipped in 3.96s`. `ruff check .` passed; `ruff format --check .` reported `118 files already formatted`; `git diff --check` passed. New tests reproduced the previous early-caller behavior before implementation. They cover multi-part greeting and terminal replies, persistence mismatch, missing/malformed completion, incomplete audio, clear events, duplicate marks, closed transport, and immediate disconnect after terminal completion. No dependencies, migrations, paid API calls, or cloud resources were added.

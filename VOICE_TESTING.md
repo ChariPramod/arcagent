@@ -66,7 +66,9 @@ The client sends the evaluation credential in a header. It refuses the live voic
 
 The harness waits for the freshly acknowledged agent turn to appear in the database, rather than feeding its caller model stale transcript text. Incomplete audio or missing committed conversation state must be reported as failures. Per-scenario infrastructure errors should leave an inspectable result without disclosing credentials or raw exception payloads.
 
-Known blocker for a reliable conversational audio benchmark: a mark identifies one TTS utterance, not an entire logical reply. The simulated caller can answer before a multi-part reply finishes. A terminal server close can also conservatively fail a scenario if the simulated caller attempts another response. Add explicit logical-response completion signaling and a terminal multi-part regression before interpreting this harness as a quality or release gate. The current transport and persistence checks remain useful integration diagnostics.
+The isolated stream emits `eval.reply_complete` after all utterances in a logical reply have been acknowledged. Its `reply` object contains `texts` (the ordered utterance strings) and `terminal` (a boolean). The client acknowledges each mark while waiting for this event, then the runner verifies each text against committed transcript records. It answers the complete reply once, or stops without another caller-model or synthesis request when `terminal` is true. The live Twilio stream never emits this extension. Upgrade the evaluation backend and harness together; an older backend without completion events fails with a bounded timeout.
+
+Missing or malformed completion, partial/unmarked audio, and closure before completion fail explicitly. The completion event establishes simulated playback and reply boundaries; it does not establish real-phone latency or correct qualification. Independent outcome checks remain necessary before using audio results as a release gate.
 
 ## What the measurements mean
 

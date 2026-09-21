@@ -4,7 +4,7 @@
 
 Synthesises each persona utterance with Cartesia in a different voice, pushes mulaw frames
 through a fake Twilio WebSocket into the isolated ``/eval/voice/stream`` handler, and answers when
-the agent's mark arrives.
+the server signals that the full logical reply has completed playback.
 
 This is what tier 1 cannot see: STT errors, endpointing that cuts a caller off, and barge
 in. It is slower and it costs money, so it runs on a subset by default.
@@ -91,17 +91,18 @@ async def run_audio_scenario(
             last_agent_index = -1
             for _ in range(max_turns):
                 phase = "agent audio playback"
-                agent_audio = await call.wait_for_agent(wait_s=agent_wait_s)
-                if not agent_audio.frames or agent_audio.mark_name is None:
-                    raise TimeoutError
+                reply = await call.wait_for_reply(wait_s=agent_wait_s)
                 phase = "agent transcript persistence"
-                last_agent_index, agent_text = await wait_for_agent_turn(
-                    call.call_sid, after_index=last_agent_index, wait_s=persistence_wait_s
-                )
-                if not agent_text.strip():
-                    raise ValueError
+                for expected_text in reply.texts:
+                    last_agent_index, agent_text = await wait_for_agent_turn(
+                        call.call_sid, after_index=last_agent_index, wait_s=persistence_wait_s
+                    )
+                    if agent_text != expected_text:
+                        raise ValueError
+                if reply.terminal:
+                    break
                 phase = "caller response"
-                turn = await caller.reply_to([agent_text])
+                turn = await caller.reply_to(reply.texts)
                 if turn.hung_up or not turn.utterance.strip():
                     break
                 phase = "caller audio playback"

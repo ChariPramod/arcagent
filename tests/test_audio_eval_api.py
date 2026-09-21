@@ -90,12 +90,15 @@ def test_audio_eval_completes_and_persists_simulation_without_external_actions(
                     ]
                 )
                 answers_sent = 0
+                reply_events = []
                 while True:
                     message = ws.receive()
                     if message["type"] == "websocket.close":
                         assert message["code"] == 1000
                         break
                     frame = json.loads(message["text"])
+                    if frame["event"] == "eval.reply_complete":
+                        reply_events.append(frame)
                     if frame["event"] == "mark":
                         if disconnect and len(model.calls) == answer_count:
                             ws.close()
@@ -110,12 +113,30 @@ def test_audio_eval_completes_and_persists_simulation_without_external_actions(
                                 pytest.fail("disconnected call was not finalized")
                             break
                         ws.send_json(mark_message(frame["mark"]["name"]))
-                        if answers_sent < answer_count:
-                            text = next(answers)
-                            client.portal.call(
-                                stt.push, dg_results(text, is_final=True, speech_final=True)
-                            )
-                            answers_sent += 1
+                    reply_ready = (
+                        frame["event"] == "eval.reply_complete"
+                        if evaluation
+                        else frame["event"] == "mark"
+                    )
+                    if reply_ready and answers_sent < answer_count:
+                        text = next(answers)
+                        client.portal.call(
+                            stt.push, dg_results(text, is_final=True, speech_final=True)
+                        )
+                        answers_sent += 1
+                if evaluation:
+                    assert len(reply_events) == answer_count + 1
+                    assert frame == reply_events[-1]
+                    assert [item["reply"]["terminal"] for item in reply_events] == [
+                        False,
+                        False,
+                        False,
+                        False,
+                        True,
+                    ]
+                    assert all(item["reply"]["texts"] for item in reply_events)
+                else:
+                    assert reply_events == []
         assert answers_sent == answer_count
         assert len(model.calls) == answer_count
         with session_scope(database_url) as db:

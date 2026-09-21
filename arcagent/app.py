@@ -121,6 +121,11 @@ async def _run_voice_session(
         )
     )
 
+    async def reply_complete(texts: list[str], terminal: bool) -> None:
+        await websocket.send_json(
+            {"event": "eval.reply_complete", "reply": {"texts": texts, "terminal": terminal}}
+        )
+
     try:
         await stt.start()
         await tts.start()
@@ -132,6 +137,7 @@ async def _run_voice_session(
             settings=settings,
             turn_sink=sink,
             on_start=sink.open,
+            on_reply_complete=reply_complete if evaluation else None,
         )
         await session.run()
         if evaluation:

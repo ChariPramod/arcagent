@@ -95,6 +95,7 @@ class TurnRecord:
 
 TurnSink = Callable[[TurnRecord], Awaitable[None]]
 StartHook = Callable[[StartEvent], Awaitable[None]]
+ReplyCompleteHook = Callable[[list[str], bool], Awaitable[None]]
 
 
 @dataclass(slots=True)
@@ -142,6 +143,7 @@ class CallSession:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         playback_timeout_s: float = 60.0,
+        on_reply_complete: ReplyCompleteHook | None = None,
     ) -> None:
         self.socket = socket
         self.stt = stt
@@ -150,6 +152,7 @@ class CallSession:
         self.settings = settings
         self.turn_sink = turn_sink
         self.on_start = on_start
+        self.on_reply_complete = on_reply_complete
         self.clock = clock
         self.sleep = sleep
         self.playback_timeout_s = playback_timeout_s
@@ -174,6 +177,7 @@ class CallSession:
         self._final_segments: list[TranscriptEvent] = []
         self._last_caller_activity = self.clock()
         self._done = asyncio.Event()
+        self._terminal_reply_completed = False
 
         # Spanish fallback: after the fixed message the caller keys their number, so the
         # session collects DTMF instead of transcripts until they press hash.
@@ -217,7 +221,7 @@ class CallSession:
             try:
                 message = await self.socket.receive_json()
             except SocketClosed:
-                if not self._done.is_set():
+                if not self._done.is_set() and not self._terminal_reply_completed:
                     self.outcome = "abandoned"
                 self.end()
                 return
@@ -276,7 +280,7 @@ class CallSession:
                         self.dtmf_digits.append(event.digit)
                 case StopEvent():
                     self.stream.on_stop(event)
-                    if not self._done.is_set():
+                    if not self._done.is_set() and not self._terminal_reply_completed:
                         self.outcome = "abandoned"
                     self.end()
                     return
@@ -454,16 +458,31 @@ class CallSession:
             if transcript is sentinel:
                 await self._speak(line, timings)
                 await self._wait_for_playback()
+                await self._notify_reply_complete([line], transcript is _GOODBYE_SENTINEL)
                 if transcript is _GOODBYE_SENTINEL:
                     self.end()
                 return
+        texts: list[str] = []
         timings.mark_llm_start()
         async for text in self.responder.respond(transcript):
             timings.mark_llm_first_token()
             if not text.strip():
                 continue
+            texts.append(text)
             await self._speak(text, timings)
         await self._wait_for_playback()
+        await self._notify_reply_complete(texts, self.responder.should_end)
+
+    async def _notify_reply_complete(self, texts: list[str], terminal: bool) -> None:
+        # Timeout and disconnect set done; barge-in cancels this reply task. A silence
+        # goodbye may finish successfully even though the call outcome is abandoned.
+        if texts and not self._done.is_set():
+            # Commit this fact before the callback can yield to a remote disconnect.
+            # A stop after acknowledged terminal playback is a successful close.
+            if terminal:
+                self._terminal_reply_completed = True
+            if self.on_reply_complete is not None:
+                await self.on_reply_complete(texts, terminal)
 
     async def _wait_for_playback(self) -> None:
         try:

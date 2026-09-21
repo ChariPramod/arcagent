@@ -181,10 +181,21 @@ async def test_scenario_waits_for_ack_and_finalization_commits(
                 if fail_database:
                     with session_scope(url) as session:
                         Base.metadata.drop_all(session.get_bind())
+                    self.complete_reply()
                 else:
                     writers.append(asyncio.create_task(self.persist_later(False)))
             elif message["event"] == "stop" and not fail_database:
                 writers.append(asyncio.create_task(self.persist_later(True)))
+
+        def complete_reply(self):
+            self.messages.put_nowait(
+                json.dumps(
+                    {
+                        "event": "eval.reply_complete",
+                        "reply": {"texts": ["Goodbye"], "terminal": False},
+                    }
+                )
+            )
 
         async def persist_later(self, finish):
             await asyncio.sleep(0.02)
@@ -196,6 +207,8 @@ async def test_scenario_waits_for_ack_and_finalization_commits(
                     repo.add_turn(
                         self.call_id, 0, "agent", "Goodbye", latency={"playback_start_ms": 40}
                     )
+            if not finish:
+                self.complete_reply()
 
         async def close(self):
             pass
