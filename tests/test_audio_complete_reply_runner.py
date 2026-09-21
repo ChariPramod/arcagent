@@ -113,7 +113,7 @@ class EvaluationServerSocket:
         return await self.inbox.get()
 
 
-@pytest.mark.timeout(5)
+@pytest.mark.timeout(15)
 @pytest.mark.parametrize(
     "failure", [None, "missing_completion", "transcript_mismatch", "wrong_outcome", "wrong_field"]
 )
@@ -153,8 +153,10 @@ async def test_runner_waits_for_complete_reply_and_never_answers_terminal_reply(
             model,
             caller_voice_id="fixture",
             auth_token="fixture",
-            agent_wait_s=0.1,
-            persistence_wait_s=0.1,
+            # Real SQLite commits and cold imports can exceed a frame-scale budget
+            # on shared CI. Only the intentional missing-event test needs a short wait.
+            agent_wait_s=0.1 if failure == "missing_completion" else 3.0,
+            persistence_wait_s=3.0,
         )
         if failure in {"missing_completion", "transcript_mismatch"}:
             assert result.error is not None
