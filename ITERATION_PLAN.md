@@ -81,3 +81,10 @@ Final local verification: `592 passed, 1 skipped in 5.85s`; Ruff lint passed; `1
 Implemented cached prompt readiness checks, authenticated voice entrypoint rejection before vendor startup, text/mutation prompt gates, early empty-suite rejection, and `python -m evals.preflight`. No production bypass and no owner prompt/persona edits. Explicit temporary test fixtures preserve successful-path coverage. Current repository preflight correctly exits `2` with seven placeholder prompts and no selected personas.
 
 Final local verification: `614 passed, 1 skipped in 5.96s`; Ruff lint passed; `130 files already formatted`; `git diff --check` passed. No new dependencies, migrations, paid calls, or cloud resources.
+
+
+## Operations workspace iteration
+
+Added an authenticated read-only operational overview and a premium working interface with configuration state, call activity, recent failures, and recovery guidance. Added partial database-failure responses, strict frontend response checks, bounded requests, and safe native-Next identity handling. Kept existing Sites/Vinext deployment; added native Next.js scripts and CI build. Uses Motion with reduced-motion support and an attributed static Magic UI accent. No telephony actions, paid services, or owner prompt/persona changes.
+
+Verification: backend `619 passed, 1 skipped`; frontend `18 passed`; lint, formatting, typechecking, native Next build, and Sites build passed. HTTP checks confirm demo availability and native authentication rejection. Next: verified native identity, browser interaction coverage, then measured controlled-call latency and turn-detection experiments after owner setup.

@@ -188,3 +188,16 @@ Final local suite: `592 passed, 1 skipped in 5.85s`. Ruff lint passed; formattin
 
 
 Latest readiness iteration: `614 passed, 1 skipped in 5.96s`; lint/formatting passed. The original owner prompt and persona gaps remain, but execution paths now reject them explicitly. Run the preflight command above to see the remaining input work without credentials or paid calls.
+
+
+## Operations interface iteration
+
+Added an Operations landing view to the workspace: authenticated configuration checks, recent call counts, abandoned/unfinished call review, prompt findings, and recovery guides. Fictional demo scenarios exercise setup and database-outage states. Counts remain unavailable when the database fails; frontend timeouts and malformed responses show explicit retry states. Requests never initiate calls, send messages, or retry ambiguous routing actions. A copyable report includes configuration information without transcript content.
+
+The UI uses TypeScript, Tailwind v4, shadcn/Base UI, Lucide, Motion, and a selective Magic UI dot-pattern adaptation. Native Next.js scripts now coexist with the existing Vinext/Sites deployment. Use `npm run dev:next` from `web/` to explore the native demo. Native live records remain locked until a verified identity adapter is configured; incoming Sites-style headers are not trusted there. The existing Sites build preserves its trusted hosting boundary. See `web/SETUP.md` for commands and limitations.
+
+Your next setup remains approved prompts/personas, credentials/budget, and controlled call validation. Configuration checks indicate presence, not vendor entitlement, reachability, or clinical suitability. The new page is not a monitoring service or an automatic incident-recovery system. This iteration updates repository source; it does not redeploy the previously published site.
+
+Verification for this iteration: backend `619 passed, 1 skipped in 6.03s`; frontend `18 passed, 0 failed`. Ruff lint and formatting passed (`133 files already formatted`), frontend lint/typechecking passed, and both native Next.js and Sites production builds passed. Typechecking also passed after switching builds. Native production HTTP checks returned `200` for the demo and `401` for the console endpoint with forged Sites identity headers. Browser visual/interaction testing and live vendor calls were not performed. New dependencies are pinned `next@16.3.5` for native App Router support and `motion@13.4.0` for accessible transitions; no Python dependencies or migrations were added.
+
+Next engineering priorities: implement and test a verified native session adapter before exposing live records outside Sites; add browser interaction coverage for refresh, failure review, keyboard navigation, and reduced motion; then measure real turn detection and playback latency with approved controlled calls. Keep the existing offline regressions as the promotion gate, and retain separate staging credentials and data. Native build output is isolated in `.next-native` so it does not collide with Sites output.

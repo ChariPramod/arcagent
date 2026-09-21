@@ -116,3 +116,26 @@ void test('local HTTP is explicitly opt-in and restricted to loopback', async ()
     503,
   );
 });
+void test('operations is a read-only allowlisted route with server credentials', async () => {
+  const transport: typeof fetch = async (url, init) => {
+    assert.equal(
+      url instanceof Request ? url.url : url.toString(),
+      'https://backend.example/api/console/operations',
+    );
+    assert.equal(
+      new Headers(init?.headers).get('Authorization'),
+      'Bearer test-server-secret',
+    );
+    assert.equal(init?.redirect, 'error');
+    return Response.json({ database: { available: false }, summary: null });
+  };
+  const response = await proxyConsole(
+    new Request('https://site.example/api/console/operations'),
+    ['operations'],
+    'owner',
+    config,
+    transport,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(((await response.json()) as { summary: unknown }).summary, null);
+});

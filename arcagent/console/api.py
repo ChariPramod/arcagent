@@ -283,3 +283,11 @@ def compare_runs(session: Database, before: int, after: int) -> dict[str, Any]:
         "metrics": deltas,
         "regressions": regressions,
     }
+
+
+@router.get("/operations")
+def operations(settings: Annotated[Settings, Depends(get_settings)]) -> dict[str, Any]:
+    """Configuration readiness and recent call health; no active vendor probes."""
+    from arcagent.console.operations import operation_status
+
+    return operation_status(settings)

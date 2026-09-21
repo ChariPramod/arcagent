@@ -10,7 +10,13 @@ export default async function Demo({
   return (
     <Console
       demo
-      initialView={params.view === 'evaluations' ? 'evaluations' : 'calls'}
+      initialView={
+        params.call || params.view === 'calls'
+          ? 'calls'
+          : params.view === 'evaluations'
+            ? 'evaluations'
+            : 'operations'
+      }
       initialCall={
         demoCalls.some((call) => call.id === Number(params.call))
           ? Number(params.call)

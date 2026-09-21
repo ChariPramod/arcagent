@@ -27,3 +27,14 @@ Conversation search and date/outcome filters apply to the loaded page, as indica
 The interface uses React, Vinext's Next-compatible app routing, Tailwind, shadcn/Base UI primitives, Lucide icons, Recharts, and resizable panels. The Sites/Vite/Cloudflare dependencies provide authenticated Worker hosting. Security updates and matching peer dependencies are pinned in the lockfile. No Python dependencies were added.
 
 A feature-detected WebMCP read tool exposes only the currently visible conversation summaries. Unsupported browsers continue normally. A supported browser WebMCP validation context was unavailable during implementation, so browser-level registration has not been verified.
+
+
+## Operations workspace and native Next.js
+
+The workspace now opens on Operations: configuration checks, recent call counts, abandoned/unfinished call review, and recovery guidance. The authenticated read-only `operations` endpoint exposes no caller names or contact details. Active calls can appear as unfinished. Database outages preserve configuration findings but leave counts unavailable. Request timeouts and invalid data show retry states; no live errors are replaced with demo data. `/demo?view=operations` offers clearly fictional setup/configured/outage scenarios.
+
+The existing default scripts retain the Vinext/Sites build and identity boundary. Native Next.js is available with `npm run dev:next`, `npm run build:next`, and `npm run start:next`. Both builds are checked in CI. Run them sequentially: Next and Vinext generate the same ignored type declaration file. Native Next uses `tsconfig.next.json` and the existing Tailwind PostCSS dependency.
+
+Native Next deliberately denies live workspace access until a verified session adapter is implemented. It never trusts incoming Sites identity headers. Only the Sites Vite build defines the trusted-runtime marker, and that artifact still must run behind the trusted Sites dispatcher. Do not add the marker to a native deployment to bypass authentication. The landing page and fictional demo work in native Next without account setup.
+
+New dependencies: Next.js for the native App Router build and Motion for reduced-motion-aware status transitions. Tailwind v4, TypeScript, shadcn/Base UI, and Lucide remain the shared UI stack. A selective static Magic UI DotPattern adaptation is attributed in `THIRD_PARTY_NOTICES.md`; no separate Aceternity library or paid templates were added. [Next TypeScript configuration](https://nextjs.org/docs/app/api-reference/config/next-config-js/typescript), [Motion accessibility](https://motion.dev/docs/react-use-reduced-motion).

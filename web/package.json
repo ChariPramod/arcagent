@@ -12,7 +12,10 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test lib/*.test.ts"
+    "test": "node --experimental-strip-types --test lib/*.test.ts",
+    "dev:next": "next dev",
+    "build:next": "next build --webpack",
+    "start:next": "next start"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
@@ -24,6 +27,8 @@
     "embla-carousel-react": "8.5.2",
     "input-otp": "1.4.2",
     "lucide-react": "1.31.0",
+    "motion": "13.4.0",
+    "next": "16.3.5",
     "react": "19.2.8",
     "react-day-picker": "9.8.1",
     "react-dom": "19.2.8",

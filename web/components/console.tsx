@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useConversationTool } from '@/lib/use-conversation-tool';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import {
+  Activity,
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
@@ -46,6 +47,7 @@ import {
 } from '@/components/ui/table';
 import { Choice } from '@/components/choice';
 import { CallReview } from '@/components/call-detail';
+import { Operations } from '@/components/operations';
 import { Metric } from '@/components/metric';
 const Evaluations = lazy(() =>
   import('@/components/evaluations').then((module) => ({
@@ -62,11 +64,11 @@ import {
   outcomeLabels,
 } from '@/lib/domain';
 import type { CallDetail, CallSummary, Page } from '@/lib/domain';
-type View = 'calls' | 'evaluations';
+type View = 'operations' | 'calls' | 'evaluations';
 export function Console({
   demo,
   userName = 'Demo workspace',
-  initialView = 'calls',
+  initialView = 'operations',
   initialCall = null,
 }: {
   demo: boolean;
@@ -89,7 +91,7 @@ export function Console({
   const [loading, setLoading] = useState(!demo);
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
-    if (demo) return;
+    if (demo || view !== 'calls') return;
     let active = true;
     // oxlint-disable-next-line react/react-compiler -- Reset stale request state before fetching.
     setLoading(true);
@@ -111,7 +113,7 @@ export function Console({
     return () => {
       active = false;
     };
-  }, [demo, offset, refresh]);
+  }, [demo, offset, refresh, view]);
   useEffect(() => {
     if (selected === null) {
       // oxlint-disable-next-line react/react-compiler -- Synchronize the selected record before async loading.
@@ -164,7 +166,11 @@ export function Console({
             <span className="text-sm text-muted-foreground">
               Workspace <span className="mx-2 text-border">/</span>
               <span className="text-foreground">
-                {view === 'calls' ? 'Conversations' : 'Evaluations'}
+                {view === 'operations'
+                  ? 'Operations'
+                  : view === 'calls'
+                    ? 'Conversations'
+                    : 'Evaluations'}
               </span>
             </span>
           </div>
@@ -191,7 +197,16 @@ export function Console({
           </div>
         )}
         <main className="workspace-content" id="main">
-          {view === 'evaluations' ? (
+          {view === 'operations' ? (
+            <Operations
+              demo={demo}
+              onReviewCall={(id) => {
+                setView('calls');
+                setSelected(id);
+                setError('');
+              }}
+            />
+          ) : view === 'evaluations' ? (
             <Suspense fallback={<Skeleton className="h-96" />}>
               <Evaluations demo={demo} />
             </Suspense>
@@ -567,6 +582,16 @@ function SideNav({
             Your workspace
           </SidebarGroupLabel>
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className="h-11 px-3"
+                isActive={view === 'operations'}
+                onClick={() => go('operations')}
+              >
+                <Activity size={17} />
+                <span>Operations</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="h-11 px-3"

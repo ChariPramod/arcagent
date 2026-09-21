@@ -28,7 +28,11 @@ export async function proxyConsole(
   if (!config.apiUrl || !config.token)
     return json({ detail: 'Your workspace is not connected yet.' }, 503);
   const route = path.join('/');
-  if (!/^(calls|evals)(\/\d+)?$/.test(route) && route !== 'compare')
+  if (
+    !/^(calls|evals)(\/\d+)?$/.test(route) &&
+    route !== 'compare' &&
+    route !== 'operations'
+  )
     return json({ detail: 'Not found' }, 404);
   let base: URL;
   try {

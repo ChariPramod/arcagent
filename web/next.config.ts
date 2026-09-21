@@ -1,5 +1,7 @@
 import type { NextConfig } from 'next';
-
-const nextConfig: NextConfig = {};
-
-export default nextConfig;
+const config: NextConfig = {
+  typescript: { tsconfigPath: 'tsconfig.next.json' },
+  distDir: '.next-native',
+  poweredByHeader: false,
+};
+export default config;
