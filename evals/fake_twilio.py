@@ -49,6 +49,7 @@ class ReceivedReply:
     frames: list[bytes]
     texts: list[str]
     terminal: bool
+    fields: dict[str, Any] | None = None
 
 
 class FakeTwilioCall:
@@ -269,7 +270,12 @@ class FakeTwilioCall:
                             or acknowledged != len(texts)
                         ):
                             raise ValueError("Invalid evaluation reply completion")
-                        return ReceivedReply(frames, texts, terminal)
+                        fields = reply.get("fields")
+                        if (terminal and not isinstance(fields, dict)) or (
+                            not terminal and "fields" in reply
+                        ):
+                            raise ValueError("Invalid evaluation reply completion fields")
+                        return ReceivedReply(frames, texts, terminal, fields)
 
     async def stream_events(self) -> AsyncIterator[dict[str, Any]]:
         while True:

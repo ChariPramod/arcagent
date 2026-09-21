@@ -122,9 +122,10 @@ async def _run_voice_session(
     )
 
     async def reply_complete(texts: list[str], terminal: bool) -> None:
-        await websocket.send_json(
-            {"event": "eval.reply_complete", "reply": {"texts": texts, "terminal": terminal}}
-        )
+        reply = {"texts": texts, "terminal": terminal}
+        if terminal:
+            reply["fields"] = responder.fields.as_lead_row()
+        await websocket.send_json({"event": "eval.reply_complete", "reply": reply})
 
     try:
         await stt.start()

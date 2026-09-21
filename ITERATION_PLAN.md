@@ -16,9 +16,13 @@ Deliverable: a safer backend and a regression suite that can establish what happ
 
 Test seams chosen under the user's authorization: HTTP/WebSocket endpoints; CallSession events to responder, persisted turn and outbound audio; CallRouter results and external actions; audio harness to authenticated test transport. Use one failing behavioral test followed by the implementation, then repeat. Mock vendor/network boundaries, not the algorithm being asserted.
 
-## Current iteration: complete reply boundaries in audio evaluation
+## Completed iteration: complete reply boundaries in audio evaluation
 
 Add a test-only logical-reply completion event after every utterance is acknowledged. The client acknowledges individual marks while accumulating the entire reply; the runner checks committed transcript text, invokes the caller once, and stops before generating a response to terminal speech. Missing completion, malformed events, interrupted output, and premature socket closure must fail explicitly. Use the existing session, WebSocket transport, and evaluation-runner seams. Keep the live Twilio protocol unchanged. Status: implemented and verified. Terminal completion is recorded before exposing the event, so an immediate client disconnect cannot reclassify completed playback as abandoned.
+
+## Current iteration: grade audio conversation quality
+
+The previous runner marked successful transport as a pass without checking qualification. Add a terminal extracted-field snapshot to the isolated protocol; compare expected outcome, handoff decision, and expected fields using the shared metrics; preserve missing evidence as a failure; save expectations and assessment reasons; return a failing CLI status for any failed scenario, including unsaved runs. Test through protocol, assessment, persisted results, and command orchestration. No owner-authored prompts/personas, external routing, or vendor parameters change.
 
 ## Next iteration: establish a meaningful conversational baseline
 
@@ -38,7 +42,7 @@ Implemented the current workstreams through separate endpoint, turn-integrity, r
 
 The regression suite covers authentication before vendor startup, partial vendor startup cleanup, actual graph/session/database simulation without external actions, multi-segment caller speech, interruption and delayed/cleared marks, bounded missing acknowledgements, synthesis failure, callback booking failures, database errors, and delayed evaluation persistence.
 
-Remaining blockers after the first iteration included reply boundaries, now handled by the second iteration. Prompt/persona completion, consent evidence, concurrent slot claiming, confirmed human handoffs, independent outcome scoring, and real speech-end-to-audio latency probes need further implementation. Offline passes establish tested software behavior, not clinical suitability or real-call performance.
+Remaining blockers after the first iteration included reply boundaries, now handled by the second iteration. Prompt/persona completion, consent evidence, concurrent slot claiming, confirmed human handoffs, remote configuration provenance, and real speech-end-to-audio latency probes need further implementation. Offline passes establish tested software behavior, not clinical suitability or real-call performance.
 
 Final local verification: `ruff check .` passed; `ruff format --check .` reported `116 files already formatted`; `pytest -q` reported `519 passed, 1 skipped in 2.98s`; `git diff --check` passed. Integration review also added guards for partial disconnect and disconnect before final audio acknowledgement, verified against the real graph/session/database path without external actions.
 
@@ -46,3 +50,10 @@ Final local verification: `ruff check .` passed; `ruff format --check .` reporte
 ## Reply-boundary iteration verification
 
 `pytest -q`: `546 passed, 1 skipped in 3.96s`. `ruff check .` passed; `ruff format --check .` reported `118 files already formatted`; `git diff --check` passed. New tests reproduced the previous early-caller behavior before implementation. They cover multi-part greeting and terminal replies, persistence mismatch, missing/malformed completion, incomplete audio, clear events, duplicate marks, closed transport, and immediate disconnect after terminal completion. No dependencies, migrations, paid API calls, or cloud resources were added.
+
+
+## Audio quality iteration verification
+
+Implemented terminal field snapshots, independent persona-based grading, persisted expectations and failure reasons, and failing CLI exit codes in both saved and unsaved modes. Tests include wrong outcomes despite successful transport, incorrect/excluded fields, absent snapshots, conflicting handoff expectations, mixed repeats, and exit status independent of the database run identifier. Existing historical results are not regraded.
+
+Final local verification: `pytest -q` reported `573 passed, 1 skipped in 4.67s`; `ruff check .` passed; `ruff format --check .` reported `121 files already formatted`; `git diff --check` passed. No dependencies or schema migrations were added, and no paid API calls or cloud resources were used. Remote configuration provenance, prompt/persona completeness, independent audio review, and actual telephony measurements remain outstanding.

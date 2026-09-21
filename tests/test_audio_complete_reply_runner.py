@@ -92,7 +92,11 @@ class EvaluationServerSocket:
                 self.emit(
                     {
                         "event": "eval.reply_complete",
-                        "reply": {"texts": texts, "terminal": prefix == "terminal"},
+                        "reply": {
+                            "texts": texts,
+                            "terminal": prefix == "terminal",
+                            **({"fields": {"name": "Pat"}} if prefix == "terminal" else {}),
+                        },
                     }
                 )
         elif message["event"] == "media" and not self.terminal_sent:
@@ -110,7 +114,9 @@ class EvaluationServerSocket:
 
 
 @pytest.mark.timeout(5)
-@pytest.mark.parametrize("failure", [None, "missing_completion", "transcript_mismatch"])
+@pytest.mark.parametrize(
+    "failure", [None, "missing_completion", "transcript_mismatch", "wrong_outcome", "wrong_field"]
+)
 async def test_runner_waits_for_complete_reply_and_never_answers_terminal_reply(
     tmp_path, monkeypatch, failure
 ):
@@ -133,7 +139,11 @@ async def test_runner_waits_for_complete_reply_and_never_answers_terminal_reply(
         group="hot_buyers",
         description="Synthetic protocol fixture",
         background="A fictional caller.",
-        expected={"outcome": "handoff"},
+        expected={
+            "outcome": "callback_booked" if failure == "wrong_outcome" else "handoff",
+            "handoff": failure != "wrong_outcome",
+            "fields": {"name": "Alex" if failure == "wrong_field" else "Pat"},
+        },
     )
     try:
         result = await run_audio_scenario(
@@ -146,7 +156,7 @@ async def test_runner_waits_for_complete_reply_and_never_answers_terminal_reply(
             agent_wait_s=0.1,
             persistence_wait_s=0.1,
         )
-        if failure:
+        if failure in {"missing_completion", "transcript_mismatch"}:
             assert result.error is not None
             assert "private-patient-secret" not in result.error
             assert model.messages == []
@@ -154,6 +164,8 @@ async def test_runner_waits_for_complete_reply_and_never_answers_terminal_reply(
         else:
             assert result.error is None
             assert result.outcome == "handoff"
+            assert result.passed is (failure is None)
+            assert result.actual_fields == {"name": "Pat"}
             assert result.turns == 1
             assert [[item["content"] for item in messages] for messages in model.messages] == [
                 GREETING

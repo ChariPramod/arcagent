@@ -284,4 +284,43 @@ async def test_silent_audio_session_does_not_count_as_a_pass(tmp_path, monkeypat
     with session_scope(url) as session:
         row = session.scalar(select(EvalResult).where(EvalResult.run_id == run_id))
         assert row.passed is False
-        assert row.notes == "No completed audio conversation was recorded"
+        assert "No completed audio conversation was recorded" in row.notes
+        assert "missing_expectations" in row.notes
+
+
+def test_transport_success_with_wrong_outcome_is_persisted_as_failure(tmp_path, monkeypatch):
+    from argparse import Namespace
+
+    from sqlalchemy import select
+
+    from arcagent.persistence.db import get_engine, session_scope
+    from arcagent.persistence.models import Base, EvalResult
+    from evals.persona import Expected
+    from evals.run_audio import AudioScenarioResult, write_results
+
+    url = f"sqlite:///{tmp_path / 'quality.db'}"
+    Base.metadata.create_all(get_engine(url))
+    monkeypatch.setattr("evals.run_audio.session_scope", lambda: session_scope(url))
+    result = AudioScenarioResult(
+        scenario_id="wrong-outcome",
+        group="hot_buyers",
+        repeat_index=0,
+        call_sid="CAquality",
+        turns=3,
+        barge_ins=0,
+        outcome="callback_booked",
+        latency_p50_ms=None,
+        latency_p95_ms=None,
+        expected=Expected(outcome="handoff", handoff=True, fields={"name": "Pat"}),
+        actual_fields={"name": "Pat"},
+    )
+    run_id = write_results(
+        Namespace(run_name="quality", prompts="v1", threshold=60), [result], "fixture"
+    )
+    with session_scope(url) as session:
+        row = session.scalar(select(EvalResult).where(EvalResult.run_id == run_id))
+        assert row.passed is False
+        assert row.expected["outcome"] == "handoff"
+        assert row.actual["fields"] == {"name": "Pat"}
+        assert row.field_accuracy == 1.0
+        assert "outcome_mismatch" in row.notes

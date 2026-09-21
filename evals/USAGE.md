@@ -39,8 +39,9 @@ are allowed and reported. Editing persona files on disk does not change a histor
 comparison or its category labels.
 
 Historical runs have no snapshot and must be rerun for a merge verdict. There is no inferred
-backfill from today's files. Audio evaluations do not yet record the remote server's input
-configuration or qualification metrics and cannot produce this text qualification verdict.
+backfill from today's files. Audio evaluations grade expected outcomes and extracted fields, but do not yet record the
+remote server's full input configuration and cannot produce this text comparison verdict.
+Their command exits unsuccessfully when any scenario fails, including with `--no-db`.
 
 ## Synthetic delivery mutations
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import select
 
@@ -28,8 +29,9 @@ from arcagent.persistence.models import Call, Tier, Turn
 from arcagent.persistence.repo import EvalRepository
 from arcagent.speech.cartesia_tts import CartesiaTTS
 from evals import metrics
+from evals.audio_scoring import AudioAssessment, assess_audio
 from evals.fake_twilio import FakeTwilioCall, validate_eval_url
-from evals.persona import Persona, PersonaError, load_personas
+from evals.persona import Expected, Persona, PersonaError, load_personas
 from evals.runner import git_sha
 from evals.simulator import SimulatedCaller
 
@@ -54,6 +56,19 @@ class AudioScenarioResult:
     latency_p95_ms: int | None
     stage_latencies: dict[str, list[int]] = field(default_factory=dict)
     error: str | None = None
+    expected: Expected | None = None
+    actual_fields: dict[str, Any] | None = None
+
+    @property
+    def assessment(self) -> AudioAssessment | None:
+        if self.expected is None:
+            return None
+        return assess_audio(self.expected, self.actual_fields, self.outcome, self.error, self.turns)
+
+    @property
+    def passed(self) -> bool:
+        assessment = self.assessment
+        return assessment is not None and assessment.passed
 
 
 async def synthesize(tts: CartesiaTTS, text: str, voice_id: str) -> bytes:
@@ -83,6 +98,7 @@ async def run_audio_scenario(
     call = FakeTwilioCall(stream_url, from_number="+15550000001", auth_token=auth_token)
     stages: dict[str, list[int]] = {}
     outcome: str | None = None
+    actual_fields: dict[str, Any] | None = None
     phase = "connection"
     try:
         async with call:
@@ -100,6 +116,7 @@ async def run_audio_scenario(
                     if agent_text != expected_text:
                         raise ValueError
                 if reply.terminal:
+                    actual_fields = reply.fields
                     break
                 phase = "caller response"
                 turn = await caller.reply_to(reply.texts)
@@ -140,6 +157,8 @@ async def run_audio_scenario(
         latency_p95_ms=None,
         stage_latencies=stages,
         error=error,
+        expected=persona.expected.model_copy(deep=True),
+        actual_fields=actual_fields,
     )
 
 
@@ -325,16 +344,20 @@ async def run(args: argparse.Namespace) -> int:
                     auth_token=settings.audio_eval_token,
                 )
                 results.append(result)
+                assessment = result.assessment
+                reasons = assessment.reasons if assessment else ("missing_expectations",)
                 print(
-                    f"    outcome={result.outcome}  turns={result.turns}  "
+                    f"    passed={result.passed}  outcome={result.outcome}  turns={result.turns}  "
                     f"barge_ins={result.barge_ins}  response latency=not measured"
+                    + (f"  reasons={','.join(reasons)}" if reasons else "")
                     + (f"  error={result.error}" if result.error else "")
                 )
 
     print(format_latency(results))
-    if args.no_db:
-        return 0
-    return write_results(args, results, git_sha())
+    if not args.no_db:
+        run_id = write_results(args, results, git_sha())
+        print(f"\nrun id {run_id}")
+    return 0 if results and all(result.passed for result in results) else 1
 
 
 def write_results(args: argparse.Namespace, results: list[AudioScenarioResult], sha: str) -> int:
@@ -351,29 +374,43 @@ def write_results(args: argparse.Namespace, results: list[AudioScenarioResult], 
             error = result.error
             if error is None and (result.outcome is None or result.turns == 0):
                 error = "No completed audio conversation was recorded"
+            assessment = result.assessment
+            reasons = assessment.reasons if assessment is not None else ("missing_expectations",)
+            notes = "; ".join(filter(None, (error, *reasons))) or None
             repo.add_result(
                 run_row.id,
                 scenario_id=result.scenario_id,
                 repeat_index=result.repeat_index,
-                passed=error is None,
+                passed=result.passed,
+                expected=result.expected.model_dump(mode="json") if result.expected else None,
+                field_accuracy=assessment.field_accuracy if assessment else None,
+                handoff_expected=result.expected.handoff if result.expected else None,
+                handoff_actual=result.outcome == "handoff",
                 latency_p50_ms=result.latency_p50_ms,
                 latency_p95_ms=result.latency_p95_ms,
                 actual={
                     "outcome": result.outcome,
+                    "fields": result.actual_fields,
+                    "assessment": {
+                        "outcome_correct": assessment.outcome_correct,
+                        "handoff_correct": assessment.handoff_correct,
+                        "missed_fields": list(assessment.missed_fields),
+                        "reasons": list(assessment.reasons),
+                    }
+                    if assessment
+                    else None,
                     "barge_ins": result.barge_ins,
                     "routing": "simulated_no_external_actions",
                     "response_latency": "not_measured",
                 },
-                notes=error,
+                notes=notes,
             )
         return run_row.id
 
 
 def main() -> None:
     configure_logging(level="WARNING")
-    run_id = asyncio.run(run(parse_args()))
-    if run_id:
-        print(f"\nrun id {run_id}")
+    raise SystemExit(asyncio.run(run(parse_args())))
 
 
 if __name__ == "__main__":

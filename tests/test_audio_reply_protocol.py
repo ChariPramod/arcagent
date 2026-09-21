@@ -18,7 +18,10 @@ def mark(name):
 
 
 def complete(texts, terminal=False):
-    return {"event": "eval.reply_complete", "reply": {"texts": texts, "terminal": terminal}}
+    reply = {"texts": texts, "terminal": terminal}
+    if terminal is True:
+        reply["fields"] = {}
+    return {"event": "eval.reply_complete", "reply": reply}
 
 
 @pytest.fixture
@@ -154,3 +157,42 @@ async def test_completion_requires_a_structured_reply(transport, reply):
         transport.push({"event": "eval.reply_complete", "reply": reply})
         with pytest.raises(ValueError, match="completion"):
             await call.wait_for_reply(wait_s=1)
+
+
+async def test_terminal_reply_exposes_extracted_fields(transport):
+    fields = {"treatment_interest": "full_arch", "pain_level": 8, "objections": []}
+    async with client() as call:
+        transport.push(media())
+        transport.push(mark("terminal"))
+        message = complete(["Goodbye"], terminal=True)
+        message["reply"]["fields"] = fields
+        transport.push(message)
+        reply = await call.wait_for_reply(wait_s=1)
+    assert reply.fields == fields
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"texts": ["Goodbye"], "terminal": True},
+        {"texts": ["Goodbye"], "terminal": True, "fields": None},
+        {"texts": ["Goodbye"], "terminal": True, "fields": []},
+        {"texts": ["Question"], "terminal": False, "fields": {}},
+    ],
+)
+async def test_field_snapshot_requires_terminal_dictionary(transport, reply):
+    async with client() as call:
+        transport.push(media())
+        transport.push(mark("utterance"))
+        transport.push({"event": "eval.reply_complete", "reply": reply})
+        with pytest.raises(ValueError, match="completion"):
+            await call.wait_for_reply(wait_s=1)
+
+
+async def test_nonterminal_reply_has_no_field_snapshot(transport):
+    async with client() as call:
+        transport.push(media())
+        transport.push(mark("question"))
+        transport.push(complete(["Question"]))
+        reply = await call.wait_for_reply(wait_s=1)
+    assert reply.fields is None

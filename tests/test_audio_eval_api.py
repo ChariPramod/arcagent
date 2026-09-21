@@ -135,6 +135,15 @@ def test_audio_eval_completes_and_persists_simulation_without_external_actions(
                         True,
                     ]
                     assert all(item["reply"]["texts"] for item in reply_events)
+                    assert all("fields" not in item["reply"] for item in reply_events[:-1])
+                    extracted = reply_events[-1]["reply"]["fields"]
+                    assert extracted["treatment_interest"] == "full_arch"
+                    assert extracted["pain_level"] == 8
+                    assert extracted["has_insurance"] is True
+                    assert extracted["employer_name"] == "Acme Logistics"
+                    assert extracted["name"] == "Bob Reyes"
+                    assert extracted["callback_number"] == "4155550123"
+                    assert extracted["objections"] == []
                 else:
                     assert reply_events == []
         assert answers_sent == answer_count
