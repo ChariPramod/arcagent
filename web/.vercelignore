@@ -1,0 +1,12 @@
+.next/
+.next-native/
+.vinext/
+dist/
+.wrangler/
+node_modules/
+.env*
+!.env.example
+.openai/
+outputs/
+work/
+*.tsbuildinfo
