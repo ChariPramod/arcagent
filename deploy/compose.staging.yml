@@ -1,0 +1,52 @@
+name: arcagent-staging
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: arcagent
+      POSTGRES_DB: arcagent_staging
+      POSTGRES_PASSWORD: ${STAGING_DB_PASSWORD:?Set a unique staging database password}
+    volumes:
+      - staging-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U arcagent -d arcagent_staging']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file:
+      - .env.staging
+    environment:
+      ENV: prod
+      VALIDATE_TWILIO_SIGNATURE: 'true'
+      ECHO_ENABLED: 'false'
+      ENABLE_AUDIO_EVALS: 'false'
+      DATABASE_URL: ${STAGING_DATABASE_URL:?Set staging PostgreSQL URL with postgres hostname}
+      CONSOLE_API_TOKEN: ${STAGING_CONSOLE_TOKEN:?Set independent random staging console token}
+      ADMIN_API_TOKEN: ${STAGING_ADMIN_TOKEN:?Set independent random staging admin token}
+    ports:
+      - '127.0.0.1:${STAGING_PORT:-8000}:8000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    stop_grace_period: 60s
+volumes:
+  staging-data:

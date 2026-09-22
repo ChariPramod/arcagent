@@ -16,6 +16,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from '@/components/ui/resizable';
+import { LatencyReport } from '@/components/latency-report';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { CallDetail } from '@/lib/domain';
 import { date, display, duration, label, ruleLabels } from '@/lib/domain';
@@ -90,6 +91,7 @@ export function CallReview({
           </div>
         </TabsContent>
         <TabsContent value="timing">
+          {!demo && <LatencyReport key={call.id} callId={call.id} />}
           <p className="text-sm text-muted-foreground mb-6">
             Stored measurements for each turn. A missing value means the stage
             was not measured. Playback acknowledgement measures completion, not

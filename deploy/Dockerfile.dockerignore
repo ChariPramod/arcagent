@@ -1,0 +1,15 @@
+**
+!pyproject.toml
+!README.md
+!arcagent/
+!arcagent/**
+!evals/
+!evals/**
+!scripts/
+!scripts/**
+!alembic.ini
+!alembic/
+!alembic/**
+**/__pycache__
+**/*.pyc
+**/.env*

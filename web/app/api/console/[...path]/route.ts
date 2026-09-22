@@ -18,3 +18,6 @@ export async function GET(
     },
   );
 }
+
+export const POST = GET;
+export const PATCH = GET;

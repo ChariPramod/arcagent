@@ -1,0 +1,1168 @@
+{
+  "items": [
+    {
+      "id": "silence",
+      "title": "Prolonged silence",
+      "description": "Two unanswered checks lead to a callback offer."
+    },
+    {
+      "id": "interrupt",
+      "title": "Caller interruption",
+      "description": "Playback is cleared and cancelled audio stays cancelled."
+    },
+    {
+      "id": "delayed_transcript",
+      "title": "Late transcript",
+      "description": "An expired turn rejects a transcript arriving after its deadline."
+    },
+    {
+      "id": "vendor_timeout",
+      "title": "Vendor timeout",
+      "description": "A stalled request ends with a callback offer without an automatic retry."
+    },
+    {
+      "id": "disconnect",
+      "title": "Caller disconnect",
+      "description": "Pending work is cancelled and later audio is dropped."
+    },
+    {
+      "id": "unanswered_handoff",
+      "title": "Unanswered handoff",
+      "description": "A qualified lead receives a callback offer after a failed transfer."
+    }
+  ],
+  "examples": {
+    "silence": {
+      "simulated": true,
+      "baseline": {
+        "scenario_id": "silence",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 1500,
+          "handoff_threshold": 60
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 5000,
+            "type": "silence_deadline"
+          },
+          {
+            "at_ms": 10000,
+            "type": "silence_deadline"
+          },
+          {
+            "at_ms": 15000,
+            "type": "silence_deadline"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 5000,
+            "type": "check_presence"
+          },
+          {
+            "at_ms": 10000,
+            "type": "check_presence"
+          },
+          {
+            "at_ms": 15000,
+            "type": "offer_callback"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "offer_callback",
+            "actual": [
+              "check_presence",
+              "check_presence",
+              "offer_callback"
+            ],
+            "passed": true
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "handoff",
+            "actual": [
+              "check_presence",
+              "check_presence",
+              "offer_callback"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 15000,
+          "action_count": 3,
+          "score": null,
+          "route": null
+        },
+        "passed": true
+      },
+      "candidate": {
+        "scenario_id": "silence",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 4000,
+          "handoff_threshold": 100
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 5000,
+            "type": "silence_deadline"
+          },
+          {
+            "at_ms": 10000,
+            "type": "silence_deadline"
+          },
+          {
+            "at_ms": 15000,
+            "type": "silence_deadline"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 5000,
+            "type": "check_presence"
+          },
+          {
+            "at_ms": 10000,
+            "type": "check_presence"
+          },
+          {
+            "at_ms": 15000,
+            "type": "offer_callback"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "offer_callback",
+            "actual": [
+              "check_presence",
+              "check_presence",
+              "offer_callback"
+            ],
+            "passed": true
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "handoff",
+            "actual": [
+              "check_presence",
+              "check_presence",
+              "offer_callback"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 15000,
+          "action_count": 3,
+          "score": null,
+          "route": null
+        },
+        "passed": true
+      },
+      "changes": [
+        {
+          "field": "config",
+          "before": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 1500,
+            "handoff_threshold": 60
+          },
+          "after": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 4000,
+            "handoff_threshold": 100
+          }
+        }
+      ]
+    },
+    "interrupt": {
+      "simulated": true,
+      "baseline": {
+        "scenario_id": "interrupt",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 1500,
+          "handoff_threshold": 60
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 100,
+            "type": "playback_started"
+          },
+          {
+            "at_ms": 400,
+            "type": "caller_speech_started"
+          },
+          {
+            "at_ms": 450,
+            "type": "cancelled_audio_arrived"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 400,
+            "type": "cancel_generation"
+          },
+          {
+            "at_ms": 400,
+            "type": "clear_playback"
+          },
+          {
+            "at_ms": 450,
+            "type": "discard_cancelled_audio"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "clear_playback",
+            "actual": [
+              "cancel_generation",
+              "clear_playback",
+              "discard_cancelled_audio"
+            ],
+            "passed": true
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "resume_cancelled_audio",
+            "actual": [
+              "cancel_generation",
+              "clear_playback",
+              "discard_cancelled_audio"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 450,
+          "action_count": 3,
+          "score": null,
+          "route": null
+        },
+        "passed": true
+      },
+      "candidate": {
+        "scenario_id": "interrupt",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 4000,
+          "handoff_threshold": 100
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 100,
+            "type": "playback_started"
+          },
+          {
+            "at_ms": 400,
+            "type": "caller_speech_started"
+          },
+          {
+            "at_ms": 450,
+            "type": "cancelled_audio_arrived"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 400,
+            "type": "cancel_generation"
+          },
+          {
+            "at_ms": 400,
+            "type": "clear_playback"
+          },
+          {
+            "at_ms": 450,
+            "type": "discard_cancelled_audio"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "clear_playback",
+            "actual": [
+              "cancel_generation",
+              "clear_playback",
+              "discard_cancelled_audio"
+            ],
+            "passed": true
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "resume_cancelled_audio",
+            "actual": [
+              "cancel_generation",
+              "clear_playback",
+              "discard_cancelled_audio"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 450,
+          "action_count": 3,
+          "score": null,
+          "route": null
+        },
+        "passed": true
+      },
+      "changes": [
+        {
+          "field": "config",
+          "before": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 1500,
+            "handoff_threshold": 60
+          },
+          "after": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 4000,
+            "handoff_threshold": 100
+          }
+        }
+      ]
+    },
+    "delayed_transcript": {
+      "simulated": true,
+      "baseline": {
+        "scenario_id": "delayed_transcript",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 1500,
+          "handoff_threshold": 60
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 0,
+            "type": "caller_speech_ended"
+          },
+          {
+            "at_ms": 1500,
+            "type": "transcript_deadline"
+          },
+          {
+            "at_ms": 3000,
+            "type": "transcript_arrived"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 1500,
+            "type": "ask_to_repeat"
+          },
+          {
+            "at_ms": 3000,
+            "type": "discard_late_transcript"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "discard_late_transcript",
+            "actual": [
+              "ask_to_repeat",
+              "discard_late_transcript"
+            ],
+            "passed": true
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "respond_to_late_transcript",
+            "actual": [
+              "ask_to_repeat",
+              "discard_late_transcript"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 3000,
+          "action_count": 2,
+          "score": null,
+          "route": null
+        },
+        "passed": true
+      },
+      "candidate": {
+        "scenario_id": "delayed_transcript",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 4000,
+          "handoff_threshold": 100
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 0,
+            "type": "caller_speech_ended"
+          },
+          {
+            "at_ms": 3000,
+            "type": "transcript_arrived"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 3000,
+            "type": "accept_transcript"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "discard_late_transcript",
+            "actual": [
+              "accept_transcript"
+            ],
+            "passed": false
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "respond_to_late_transcript",
+            "actual": [
+              "accept_transcript"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 3000,
+          "action_count": 1,
+          "score": null,
+          "route": null
+        },
+        "passed": false
+      },
+      "changes": [
+        {
+          "field": "config",
+          "before": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 1500,
+            "handoff_threshold": 60
+          },
+          "after": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 4000,
+            "handoff_threshold": 100
+          }
+        },
+        {
+          "field": "events",
+          "before": [
+            {
+              "at_ms": 0,
+              "type": "call_started"
+            },
+            {
+              "at_ms": 0,
+              "type": "caller_speech_ended"
+            },
+            {
+              "at_ms": 1500,
+              "type": "transcript_deadline"
+            },
+            {
+              "at_ms": 3000,
+              "type": "transcript_arrived"
+            }
+          ],
+          "after": [
+            {
+              "at_ms": 0,
+              "type": "call_started"
+            },
+            {
+              "at_ms": 0,
+              "type": "caller_speech_ended"
+            },
+            {
+              "at_ms": 3000,
+              "type": "transcript_arrived"
+            }
+          ]
+        },
+        {
+          "field": "actions",
+          "before": [
+            {
+              "at_ms": 1500,
+              "type": "ask_to_repeat"
+            },
+            {
+              "at_ms": 3000,
+              "type": "discard_late_transcript"
+            }
+          ],
+          "after": [
+            {
+              "at_ms": 3000,
+              "type": "accept_transcript"
+            }
+          ]
+        },
+        {
+          "field": "assertions",
+          "before": [
+            {
+              "name": "expected_action",
+              "expected": "discard_late_transcript",
+              "actual": [
+                "ask_to_repeat",
+                "discard_late_transcript"
+              ],
+              "passed": true
+            },
+            {
+              "name": "forbidden_action_absent",
+              "expected": "respond_to_late_transcript",
+              "actual": [
+                "ask_to_repeat",
+                "discard_late_transcript"
+              ],
+              "passed": true
+            }
+          ],
+          "after": [
+            {
+              "name": "expected_action",
+              "expected": "discard_late_transcript",
+              "actual": [
+                "accept_transcript"
+              ],
+              "passed": false
+            },
+            {
+              "name": "forbidden_action_absent",
+              "expected": "respond_to_late_transcript",
+              "actual": [
+                "accept_transcript"
+              ],
+              "passed": true
+            }
+          ]
+        },
+        {
+          "field": "metrics",
+          "before": {
+            "duration_ms": 3000,
+            "action_count": 2,
+            "score": null,
+            "route": null
+          },
+          "after": {
+            "duration_ms": 3000,
+            "action_count": 1,
+            "score": null,
+            "route": null
+          }
+        },
+        {
+          "field": "passed",
+          "before": true,
+          "after": false
+        }
+      ]
+    },
+    "vendor_timeout": {
+      "simulated": true,
+      "baseline": {
+        "scenario_id": "vendor_timeout",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 1500,
+          "handoff_threshold": 60
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 0,
+            "type": "vendor_request_started"
+          },
+          {
+            "at_ms": 2000,
+            "type": "vendor_deadline"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 2000,
+            "type": "cancel_vendor_request"
+          },
+          {
+            "at_ms": 2000,
+            "type": "offer_callback"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "offer_callback",
+            "actual": [
+              "cancel_vendor_request",
+              "offer_callback"
+            ],
+            "passed": true
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "retry_vendor",
+            "actual": [
+              "cancel_vendor_request",
+              "offer_callback"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 2000,
+          "action_count": 2,
+          "score": null,
+          "route": null
+        },
+        "passed": true
+      },
+      "candidate": {
+        "scenario_id": "vendor_timeout",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 4000,
+          "handoff_threshold": 100
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 0,
+            "type": "vendor_request_started"
+          },
+          {
+            "at_ms": 2000,
+            "type": "vendor_deadline"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 2000,
+            "type": "cancel_vendor_request"
+          },
+          {
+            "at_ms": 2000,
+            "type": "offer_callback"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "offer_callback",
+            "actual": [
+              "cancel_vendor_request",
+              "offer_callback"
+            ],
+            "passed": true
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "retry_vendor",
+            "actual": [
+              "cancel_vendor_request",
+              "offer_callback"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 2000,
+          "action_count": 2,
+          "score": null,
+          "route": null
+        },
+        "passed": true
+      },
+      "changes": [
+        {
+          "field": "config",
+          "before": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 1500,
+            "handoff_threshold": 60
+          },
+          "after": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 4000,
+            "handoff_threshold": 100
+          }
+        }
+      ]
+    },
+    "disconnect": {
+      "simulated": true,
+      "baseline": {
+        "scenario_id": "disconnect",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 1500,
+          "handoff_threshold": 60
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 100,
+            "type": "vendor_request_started"
+          },
+          {
+            "at_ms": 200,
+            "type": "caller_disconnected"
+          },
+          {
+            "at_ms": 800,
+            "type": "audio_arrived"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 200,
+            "type": "cancel_pending_work"
+          },
+          {
+            "at_ms": 800,
+            "type": "discard_audio"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "cancel_pending_work",
+            "actual": [
+              "cancel_pending_work",
+              "discard_audio"
+            ],
+            "passed": true
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "send_after_disconnect",
+            "actual": [
+              "cancel_pending_work",
+              "discard_audio"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 800,
+          "action_count": 2,
+          "score": null,
+          "route": null
+        },
+        "passed": true
+      },
+      "candidate": {
+        "scenario_id": "disconnect",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 4000,
+          "handoff_threshold": 100
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 100,
+            "type": "vendor_request_started"
+          },
+          {
+            "at_ms": 200,
+            "type": "caller_disconnected"
+          },
+          {
+            "at_ms": 800,
+            "type": "audio_arrived"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 200,
+            "type": "cancel_pending_work"
+          },
+          {
+            "at_ms": 800,
+            "type": "discard_audio"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "cancel_pending_work",
+            "actual": [
+              "cancel_pending_work",
+              "discard_audio"
+            ],
+            "passed": true
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "send_after_disconnect",
+            "actual": [
+              "cancel_pending_work",
+              "discard_audio"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 800,
+          "action_count": 2,
+          "score": null,
+          "route": null
+        },
+        "passed": true
+      },
+      "changes": [
+        {
+          "field": "config",
+          "before": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 1500,
+            "handoff_threshold": 60
+          },
+          "after": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 4000,
+            "handoff_threshold": 100
+          }
+        }
+      ]
+    },
+    "unanswered_handoff": {
+      "simulated": true,
+      "baseline": {
+        "scenario_id": "unanswered_handoff",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 1500,
+          "handoff_threshold": 60
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 100,
+            "type": "qualification_complete"
+          },
+          {
+            "at_ms": 30100,
+            "type": "coordinator_no_answer"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 100,
+            "type": "attempt_handoff"
+          },
+          {
+            "at_ms": 30100,
+            "type": "offer_callback"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "attempt_handoff",
+            "actual": [
+              "attempt_handoff",
+              "offer_callback"
+            ],
+            "passed": true
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "claim_transfer_success",
+            "actual": [
+              "attempt_handoff",
+              "offer_callback"
+            ],
+            "passed": true
+          },
+          {
+            "name": "callback_fallback",
+            "expected": "offer_callback",
+            "actual": [
+              "attempt_handoff",
+              "offer_callback"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 30100,
+          "action_count": 2,
+          "score": 65,
+          "route": "handoff"
+        },
+        "passed": true
+      },
+      "candidate": {
+        "scenario_id": "unanswered_handoff",
+        "simulated": true,
+        "provenance": "synthetic-policy-v1; real scoring; simulated transport and timing; no vendor calls",
+        "config": {
+          "vendor_timeout_ms": 2000,
+          "transcript_timeout_ms": 4000,
+          "handoff_threshold": 100
+        },
+        "events": [
+          {
+            "at_ms": 0,
+            "type": "call_started"
+          },
+          {
+            "at_ms": 100,
+            "type": "qualification_complete"
+          }
+        ],
+        "actions": [
+          {
+            "at_ms": 100,
+            "type": "offer_callback"
+          }
+        ],
+        "assertions": [
+          {
+            "name": "expected_action",
+            "expected": "attempt_handoff",
+            "actual": [
+              "offer_callback"
+            ],
+            "passed": false
+          },
+          {
+            "name": "forbidden_action_absent",
+            "expected": "claim_transfer_success",
+            "actual": [
+              "offer_callback"
+            ],
+            "passed": true
+          },
+          {
+            "name": "callback_fallback",
+            "expected": "offer_callback",
+            "actual": [
+              "offer_callback"
+            ],
+            "passed": true
+          }
+        ],
+        "metrics": {
+          "duration_ms": 100,
+          "action_count": 1,
+          "score": 65,
+          "route": "callback"
+        },
+        "passed": false
+      },
+      "changes": [
+        {
+          "field": "config",
+          "before": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 1500,
+            "handoff_threshold": 60
+          },
+          "after": {
+            "vendor_timeout_ms": 2000,
+            "transcript_timeout_ms": 4000,
+            "handoff_threshold": 100
+          }
+        },
+        {
+          "field": "events",
+          "before": [
+            {
+              "at_ms": 0,
+              "type": "call_started"
+            },
+            {
+              "at_ms": 100,
+              "type": "qualification_complete"
+            },
+            {
+              "at_ms": 30100,
+              "type": "coordinator_no_answer"
+            }
+          ],
+          "after": [
+            {
+              "at_ms": 0,
+              "type": "call_started"
+            },
+            {
+              "at_ms": 100,
+              "type": "qualification_complete"
+            }
+          ]
+        },
+        {
+          "field": "actions",
+          "before": [
+            {
+              "at_ms": 100,
+              "type": "attempt_handoff"
+            },
+            {
+              "at_ms": 30100,
+              "type": "offer_callback"
+            }
+          ],
+          "after": [
+            {
+              "at_ms": 100,
+              "type": "offer_callback"
+            }
+          ]
+        },
+        {
+          "field": "assertions",
+          "before": [
+            {
+              "name": "expected_action",
+              "expected": "attempt_handoff",
+              "actual": [
+                "attempt_handoff",
+                "offer_callback"
+              ],
+              "passed": true
+            },
+            {
+              "name": "forbidden_action_absent",
+              "expected": "claim_transfer_success",
+              "actual": [
+                "attempt_handoff",
+                "offer_callback"
+              ],
+              "passed": true
+            },
+            {
+              "name": "callback_fallback",
+              "expected": "offer_callback",
+              "actual": [
+                "attempt_handoff",
+                "offer_callback"
+              ],
+              "passed": true
+            }
+          ],
+          "after": [
+            {
+              "name": "expected_action",
+              "expected": "attempt_handoff",
+              "actual": [
+                "offer_callback"
+              ],
+              "passed": false
+            },
+            {
+              "name": "forbidden_action_absent",
+              "expected": "claim_transfer_success",
+              "actual": [
+                "offer_callback"
+              ],
+              "passed": true
+            },
+            {
+              "name": "callback_fallback",
+              "expected": "offer_callback",
+              "actual": [
+                "offer_callback"
+              ],
+              "passed": true
+            }
+          ]
+        },
+        {
+          "field": "metrics",
+          "before": {
+            "duration_ms": 30100,
+            "action_count": 2,
+            "score": 65,
+            "route": "handoff"
+          },
+          "after": {
+            "duration_ms": 100,
+            "action_count": 1,
+            "score": 65,
+            "route": "callback"
+          }
+        },
+        {
+          "field": "passed",
+          "before": true,
+          "after": false
+        }
+      ]
+    }
+  }
+}

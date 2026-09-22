@@ -139,3 +139,113 @@ void test('operations is a read-only allowlisted route with server credentials',
   assert.equal(response.status, 200);
   assert.equal(((await response.json()) as { summary: unknown }).summary, null);
 });
+
+void test('mutations require same origin and derive actor from authenticated identity', async () => {
+  const make = (origin: string) =>
+    new Request('https://site.example/api/console/followups', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: origin,
+        'X-Arcagent-Actor': 'forged',
+      },
+      body: JSON.stringify({ call_id: 1 }),
+    });
+  assert.equal(
+    (
+      await proxyConsole(
+        make('https://attacker.example'),
+        ['followups'],
+        'owner',
+        config,
+        never,
+      )
+    ).status,
+    403,
+  );
+  const response = await proxyConsole(
+    make('https://site.example'),
+    ['followups'],
+    'owner',
+    config,
+    async (_, init) => {
+      assert.equal(init?.method, 'POST');
+      assert.equal(new Headers(init?.headers).get('X-Arcagent-Actor'), 'owner');
+      assert.equal(init?.body, JSON.stringify({ call_id: 1 }));
+      return Response.json({ id: 1, revision: 1 });
+    },
+  );
+  assert.equal(response.status, 200);
+});
+void test('mutations never reach read-only routes or retry uncertain writes', async () => {
+  const req = new Request('https://site.example/api/console/operations', {
+    method: 'POST',
+    headers: {
+      Origin: 'https://site.example',
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  });
+  assert.equal(
+    (await proxyConsole(req, ['operations'], 'owner', config, never)).status,
+    405,
+  );
+  let attempts = 0;
+  const res = await proxyConsole(
+    req,
+    ['followups'],
+    'owner',
+    config,
+    async () => {
+      attempts++;
+      throw Error('network lost');
+    },
+  );
+  assert.equal(attempts, 1);
+  assert.equal(res.status, 503);
+  assert.match(await res.text(), /may have been saved/);
+});
+
+void test('write boundary rejects malformed and oversized bodies and missing origin', async () => {
+  for (const [body, origin, status] of [
+    ['not-json', 'https://site.example', 400],
+    ['x'.repeat(16385), 'https://site.example', 413],
+    ['{}', '', 403],
+  ] as const) {
+    const req = new Request('https://site.example/api/console/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: origin },
+      body,
+    });
+    assert.equal(
+      (await proxyConsole(req, ['feedback'], 'owner', config, never)).status,
+      status,
+    );
+  }
+});
+void test('independent review denial is a definite rejection, not an uncertain save', async () => {
+  const req = new Request(
+    'https://site.example/api/console/feedback/1/review',
+    {
+      method: 'POST',
+      headers: {
+        Origin: 'https://site.example',
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+    },
+  );
+  const response = await proxyConsole(
+    req,
+    ['feedback', '1', 'review'],
+    'owner',
+    config,
+    async () =>
+      Response.json(
+        { detail: 'An independent reviewer must review this candidate' },
+        { status: 403 },
+      ),
+  );
+  assert.equal(response.status, 403);
+  assert.match(await response.text(), /independent reviewer/);
+});

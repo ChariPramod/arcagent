@@ -15,6 +15,8 @@ from arcagent.agent.readiness import PromptReadinessError, require_ready_prompts
 from arcagent.agent.responder import GraphResponder
 from arcagent.config import Settings, get_settings
 from arcagent.console.api import router as console_router
+from arcagent.console.workbench import router as workbench_router
+from arcagent.console.workflows import router as workflows_router
 from arcagent.logging import configure_logging, get_logger
 from arcagent.persistence.models import Outcome
 from arcagent.speech.cartesia_tts import CartesiaTTS
@@ -47,6 +49,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ArcAgent", version=__version__, lifespan=lifespan)
 app.include_router(console_router)
+
+
+app.include_router(workbench_router)
+app.include_router(workflows_router)
 
 
 @app.get("/health")

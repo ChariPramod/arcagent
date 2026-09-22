@@ -42,3 +42,50 @@ export async function read<T>(
     signal?.removeEventListener('abort', cancel);
   }
 }
+
+/** Writes are never retried automatically: a lost response can follow a commit. */
+export async function write<T>(
+  path: string,
+  body: unknown,
+  method: 'POST' | 'PATCH' = 'POST',
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/console/${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch {
+    throw new Error(
+      'The action may have been saved. Refresh before trying again.',
+    );
+  }
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      'The action may have been saved. Refresh before trying again.',
+    );
+  }
+  if (!response.ok) {
+    if (response.status === 409)
+      throw new Error('This record changed. Refresh it before trying again.');
+    if (response.status === 422)
+      throw new Error(
+        'Check the required fields and text limits. Your changes were not accepted.',
+      );
+    throw new Error(
+      data &&
+        typeof data === 'object' &&
+        'detail' in data &&
+        typeof data.detail === 'string'
+        ? data.detail
+        : 'The action could not be confirmed. Refresh before trying again.',
+    );
+  }
+  return data as T;
+}

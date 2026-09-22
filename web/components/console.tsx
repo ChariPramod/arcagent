@@ -48,6 +48,16 @@ import {
 import { Choice } from '@/components/choice';
 import { CallReview } from '@/components/call-detail';
 import { Operations } from '@/components/operations';
+const Workflows = lazy(() =>
+  import('@/components/workflows').then((module) => ({
+    default: module.Workflows,
+  })),
+);
+const FailureLab = lazy(() =>
+  import('@/components/failure-lab').then((module) => ({
+    default: module.FailureLab,
+  })),
+);
 import { Metric } from '@/components/metric';
 const Evaluations = lazy(() =>
   import('@/components/evaluations').then((module) => ({
@@ -64,7 +74,7 @@ import {
   outcomeLabels,
 } from '@/lib/domain';
 import type { CallDetail, CallSummary, Page } from '@/lib/domain';
-type View = 'operations' | 'calls' | 'evaluations';
+type View = 'operations' | 'calls' | 'evaluations' | 'workflows' | 'lab';
 export function Console({
   demo,
   userName = 'Demo workspace',
@@ -170,7 +180,11 @@ export function Console({
                   ? 'Operations'
                   : view === 'calls'
                     ? 'Conversations'
-                    : 'Evaluations'}
+                    : view === 'workflows'
+                      ? 'Follow-up & feedback'
+                      : view === 'lab'
+                        ? 'Failure lab'
+                        : 'Evaluations'}
               </span>
             </span>
           </div>
@@ -206,6 +220,21 @@ export function Console({
                 setError('');
               }}
             />
+          ) : view === 'workflows' ? (
+            <Suspense fallback={<Skeleton className="h-96" />}>
+              <Workflows
+                demo={demo}
+                onReviewCall={(id) => {
+                  setView('calls');
+                  setSelected(id);
+                  setError('');
+                }}
+              />
+            </Suspense>
+          ) : view === 'lab' ? (
+            <Suspense fallback={<Skeleton className="h-96" />}>
+              <FailureLab demo={demo} />
+            </Suspense>
           ) : view === 'evaluations' ? (
             <Suspense fallback={<Skeleton className="h-96" />}>
               <Evaluations demo={demo} />
@@ -610,6 +639,26 @@ function SideNav({
               >
                 <FlaskConical size={17} />
                 <span>Evaluations</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className="h-11 px-3"
+                isActive={view === 'workflows'}
+                onClick={() => go('workflows')}
+              >
+                <Activity size={17} />
+                <span>Follow-up & feedback</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className="h-11 px-3"
+                isActive={view === 'lab'}
+                onClick={() => go('lab')}
+              >
+                <FlaskConical size={17} />
+                <span>Failure lab</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

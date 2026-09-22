@@ -50,3 +50,15 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run build:next
+
+  staging-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build staging image
+        run: docker build --tag arcagent-staging:ci --file deploy/Dockerfile .
+      - name: Verify packaged application and migrations without vendors
+        run: |
+          docker run --rm --read-only --tmpfs /tmp \
+            --env DATABASE_URL=sqlite:////tmp/image-smoke.db \
+            arcagent-staging:ci sh -c 'alembic upgrade head && python -c "from arcagent.app import app; assert any(route.path == \"/api/console/followups\" for route in app.routes)" && python -m scripts.verify_staging --help'

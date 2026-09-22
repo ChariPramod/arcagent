@@ -88,3 +88,13 @@ Final local verification: `614 passed, 1 skipped in 5.96s`; Ruff lint passed; `1
 Added an authenticated read-only operational overview and a premium working interface with configuration state, call activity, recent failures, and recovery guidance. Added partial database-failure responses, strict frontend response checks, bounded requests, and safe native-Next identity handling. Kept existing Sites/Vinext deployment; added native Next.js scripts and CI build. Uses Motion with reduced-motion support and an attributed static Magic UI accent. No telephony actions, paid services, or owner prompt/persona changes.
 
 Verification: backend `619 passed, 1 skipped`; frontend `18 passed`; lint, formatting, typechecking, native Next build, and Sites build passed. HTTP checks confirm demo availability and native authentication rejection. Next: verified native identity, browser interaction coverage, then measured controlled-call latency and turn-detection experiments after owner setup.
+
+## Failure lab, coordinator workflow, and staging iteration
+
+Implemented the agreed direction as separate tested modules: synthetic replay/counterfactual policy lab, production-layer controlled-call integration tests, persisted latency analysis, durable coordinator follow-ups, independently reviewed regression candidates, and a staging deployment recipe. The console exposes failure experiments, follow-up/feedback work, and latency coverage. Mutations use origin enforcement, verified actor attribution, optimistic revisions, atomic audits, and feedback idempotency. Database failures remain explicit; writes are never automatically retried. Feature pages are loaded on demand.
+
+Promotion remains blocked on owner-approved prompts/personas and credentials, real controlled-call evidence, verified answered/no-answer transfer callbacks, target-platform restore/restart checks, and a native identity adapter if deploying outside Sites. The replay model cannot replace actual audio pipeline tests. See FAILURE_LAB.md, STAGING_RUNBOOK.md, and PROJECT_HANDOFF.md for operational steps and remaining work.
+
+Added a second replay layer using the actual CallSession with scripted media/STT/TTS/responder adapters, versioned fixtures, implementation SHA256 provenance, and a bounded watchdog. The real interruption threshold counterfactual fails its fixed fixture as expected. This is available through `python -m scripts.run_session_replay`; the UI policy simulator remains explicitly separate.
+
+Final local validation: `690 passed, 1 skipped`; frontend `24 passed`; lint/format/typechecks and both website builds passed. No new dependencies. The staging image build is included in CI; actual deployment and live-call gates remain owner-dependent.

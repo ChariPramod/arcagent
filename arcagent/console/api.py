@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -107,7 +107,9 @@ def calls(
 
 
 @router.get("/calls/{call_id}")
-def call_detail(call_id: int, session: Database) -> dict[str, Any]:
+def call_detail(
+    call_id: Annotated[int, Path(gt=0, le=2_147_483_647)], session: Database
+) -> dict[str, Any]:
     call = session.get(Call, call_id)
     if call is None:
         raise HTTPException(404, "Call not found")
@@ -216,7 +218,9 @@ def runs(
 
 
 @router.get("/evals/{run_id}")
-def run_detail(run_id: int, session: Database) -> dict[str, Any]:
+def run_detail(
+    run_id: Annotated[int, Path(gt=0, le=2_147_483_647)], session: Database
+) -> dict[str, Any]:
     run = session.get(EvalRun, run_id)
     if run is None:
         raise HTTPException(404, "Evaluation not found")
@@ -242,7 +246,11 @@ def run_detail(run_id: int, session: Database) -> dict[str, Any]:
 
 
 @router.get("/compare")
-def compare_runs(session: Database, before: int, after: int) -> dict[str, Any]:
+def compare_runs(
+    session: Database,
+    before: Annotated[int, Query(gt=0, le=2_147_483_647)],
+    after: Annotated[int, Query(gt=0, le=2_147_483_647)],
+) -> dict[str, Any]:
     repo = EvalRepository(session)
     old, new = repo.get_run(before), repo.get_run(after)
     if old is None or new is None:
