@@ -61,4 +61,4 @@ jobs:
         run: |
           docker run --rm --read-only --tmpfs /tmp \
             --env DATABASE_URL=sqlite:////tmp/image-smoke.db \
-            arcagent-staging:ci sh -c 'alembic upgrade head && python -c "from arcagent.app import app; assert any(route.path == \"/api/console/followups\" for route in app.routes)" && python -m scripts.verify_staging --help'
+            arcagent-staging:ci sh -c 'alembic upgrade head && python -c "from arcagent.app import app; assert \"/api/console/followups\" in app.openapi()[\"paths\"]" && python -m scripts.verify_staging --help'
