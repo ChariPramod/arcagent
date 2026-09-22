@@ -32,7 +32,7 @@ async function ProtectedWorkspace() {
     return (
       <main className="mx-auto max-w-xl p-8 pt-24">
         <p className="eyebrow">Access pending</p>
-        <h1 className="text-3xl mt-4 mb-4">You're signed in.</h1>
+        <h1 className="text-3xl mt-4 mb-4">You are signed in.</h1>
         <p className="text-muted-foreground mb-6">
           Your account needs workspace access before you can view call records.
           Share this account ID with the workspace owner.

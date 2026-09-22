@@ -42,7 +42,7 @@ void test('combined filters support case, whitespace, ids, and missing fields', 
 });
 
 import { transferDescription, type TransferEvidence } from './domain.ts';
-test('transfer copy requires positive bridge evidence and preserves uncertainty', () => {
+void test('transfer copy requires positive bridge evidence and preserves uncertainty', () => {
   const transfer: TransferEvidence = {
     request_status: 'accepted',
     outcome: null,

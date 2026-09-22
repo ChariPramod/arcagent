@@ -20,7 +20,7 @@ const env = {
   ARCAGENT_OIDC_CLIENT_SECRET: 'secret',
 };
 const config = authConfig(env)!;
-test('native auth fails closed on missing or malformed configuration', () => {
+void test('native auth fails closed on missing or malformed configuration', () => {
   assert.equal(authConfig({}), null);
   for (const patch of [
     { ARCAGENT_AUTH_SECRET: 'short' },
@@ -30,7 +30,7 @@ test('native auth fails closed on missing or malformed configuration', () => {
   ])
     assert.equal(authConfig({ ...env, ...patch }), null);
 });
-test('encrypted cookies enforce integrity, purpose and expiry', async () => {
+void test('encrypted cookies enforce integrity, purpose and expiry', async () => {
   const token = await seal(config, 'session', { sub: 'actor' }, 60);
   assert.equal((await unseal(config, 'session', token))?.sub, 'actor');
   assert.equal(await unseal(config, 'transaction', token), null);
@@ -47,12 +47,12 @@ test('encrypted cookies enforce integrity, purpose and expiry', async () => {
     null,
   );
 });
-test('actor identity is issuer-bound and safe for backend audit', async () => {
+void test('actor identity is issuer-bound and safe for backend audit', async () => {
   const id = await actorId('https://issuer.example', 'subject');
   assert.match(id, /^oidc:[a-f0-9]{64}$/);
   assert.notEqual(id, await actorId('https://other.example', 'subject'));
 });
-test('return paths cannot redirect outside workspace or into auth loops', () => {
+void test('return paths cannot redirect outside workspace or into auth loops', () => {
   for (const path of [
     '//evil.test',
     '/\\evil.test',
@@ -68,7 +68,7 @@ test('return paths cannot redirect outside workspace or into auth loops', () => 
     '/workspace?view=calls',
   );
 });
-test('forged identity headers and wrong-issuer sessions grant no native identity', async () => {
+void test('forged identity headers and wrong-issuer sessions grant no native identity', async () => {
   assert.equal(
     await sessionUser(
       config,
@@ -90,7 +90,7 @@ test('forged identity headers and wrong-issuer sessions grant no native identity
     null,
   );
 });
-test('missing callback transaction fails safely and clears it', async () => {
+void test('missing callback transaction fails safely and clears it', async () => {
   const result = await callback(
     new Request('https://app.example/auth/callback?code=secret'),
     config,
@@ -103,7 +103,7 @@ test('missing callback transaction fails safely and clears it', async () => {
   assert.match(result.headers.get('set-cookie')!, /Max-Age=0/);
   assert.ok(!result.headers.get('location')!.includes('secret'));
 });
-test('logout requires matching origin and clears only after validation', () => {
+void test('logout requires matching origin and clears only after validation', () => {
   assert.equal(
     logout(
       new Request('https://app.example/auth/logout', {
@@ -124,7 +124,7 @@ test('logout requires matching origin and clears only after validation', () => {
   assert.equal(result.status, 303);
   assert.match(result.headers.get('set-cookie')!, /Max-Age=0/);
 });
-test('discovery failure produces recoverable sign-in error without leaking details', async () => {
+void test('discovery failure produces recoverable sign-in error without leaking details', async () => {
   const result = await login(
     new Request('https://app.example/auth/login'),
     config,
@@ -153,7 +153,7 @@ async function identityFixture(mode = 'valid') {
     redeemed = false;
   let tokenRequests = 0;
   const transport: typeof fetch = async (input, init) => {
-    const url = String(input);
+    const url = input instanceof Request ? input.url : input.toString();
     if (url.endsWith('/.well-known/openid-configuration'))
       return Response.json({
         issuer: config.issuer,
@@ -168,7 +168,8 @@ async function identityFixture(mode = 'valid') {
     if (url.endsWith('/jwks')) return Response.json({ keys: [jwk] });
     if (url.endsWith('/token')) {
       tokenRequests++;
-      const body = new URLSearchParams(String(init?.body));
+      assert.ok(init?.body instanceof URLSearchParams);
+      const body = new URLSearchParams(init.body);
       const verifier = body.get('code_verifier')!;
       const hash = await crypto.subtle.digest(
         'SHA-256',
@@ -226,7 +227,7 @@ async function identityFixture(mode = 'valid') {
     );
   return { transport, request, tokenRequests: () => tokenRequests };
 }
-test('full OIDC login verifies signed ID token, PKCE, session and one-use code', async () => {
+void test('full OIDC login verifies signed ID token, PKCE, session and one-use code', async () => {
   const fixture = await identityFixture();
   const response = await callback(fixture.request(), config, fixture.transport);
   assert.equal(
@@ -256,7 +257,7 @@ test('full OIDC login verifies signed ID token, PKCE, session and one-use code',
   assert.equal(replay.headers.get('location'), config.origin + '/auth/error');
 });
 for (const mode of ['nonce', 'issuer', 'audience', 'signature', 'expired'])
-  test(`OIDC rejects invalid ${mode} and never creates session`, async () => {
+  void test(`OIDC rejects invalid ${mode} and never creates session`, async () => {
     const fixture = await identityFixture(mode);
     const response = await callback(
       fixture.request(),
@@ -273,7 +274,7 @@ for (const mode of ['nonce', 'issuer', 'audience', 'signature', 'expired'])
         .some((value) => value.startsWith(SESSION_COOKIE + '=')),
     );
   });
-test('state mismatch stops before token exchange', async () => {
+void test('state mismatch stops before token exchange', async () => {
   const fixture = await identityFixture();
   const response = await callback(
     fixture.request('wrong'),
