@@ -1,0 +1,25 @@
+# Explicit source allowlist. Never upload the entire development workspace.
+**
+!pyproject.toml
+!README.md
+!arcagent/
+!arcagent/**
+!evals/
+!evals/**
+!scripts/
+!scripts/**
+!alembic.ini
+!alembic/
+!alembic/**
+!deploy/
+!deploy/Dockerfile
+!deploy/Dockerfile.dockerignore
+!deploy/cloudbuild.yaml
+**/__pycache__
+**/*.pyc
+**/.env*
+**/*.db
+**/*.sqlite*
+**/*.dump
+**/*.pem
+**/*.key

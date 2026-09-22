@@ -1,0 +1,9 @@
+# Supply _IMAGE as the fully qualified Artifact Registry image tag.
+# Submit from the repository root with the checked-in .gcloudignore.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: [build, -f, deploy/Dockerfile, -t, '${_IMAGE}', .]
+images: ['${_IMAGE}']
+timeout: 600s
+options:
+  logging: CLOUD_LOGGING_ONLY

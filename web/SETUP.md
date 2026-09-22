@@ -1,6 +1,6 @@
 # ArcAgent website
 
-The site includes a product landing page, a synthetic demo workspace, and an authenticated read-only console for the existing FastAPI service. Calls, scoring breakdowns, saved evaluation transcripts, and regression comparisons come from the existing database. The website never initiates calls or changes qualification rules.
+The site includes a product landing page, a synthetic demo workspace, and an authenticated operations console for the existing FastAPI service. Calls, scoring breakdowns, saved evaluation transcripts, and regression comparisons come from the existing database. The website never initiates calls or changes qualification rules.
 
 ## Development
 
@@ -14,9 +14,9 @@ Deploy the Python application and apply its existing database migrations. Set a 
 
 - `ARCAGENT_API_URL`: HTTPS origin of the FastAPI service. Local development additionally permits HTTP loopback.
 - `ARCAGENT_API_TOKEN`: the same secret as the backend's `CONSOLE_API_TOKEN`.
-- `ARCAGENT_ALLOWED_USER_IDS`: explicitly authorized ChatGPT account user IDs, obtained from the trusted Sites identity. An empty allowlist denies all live access.
+- `ARCAGENT_ALLOWED_USER_IDS`: explicitly authorized stable account IDs, obtained from trusted Sites identity or the native OIDC access-pending screen. An empty allowlist denies all live access.
 
-Do not use browser-exposed environment variables for these values. The production identity is supplied by the Sites dispatcher; self-hosting requires an equivalent trusted authentication boundary. The proxy does not trust browser-supplied user IDs or authorization headers, and never follows upstream redirects. API responses are not cached. The shared backend credential is intended for this private single-workspace console, not tenant isolation.
+Do not use browser-exposed environment variables for these values. Sites identity is supplied by its dispatcher. Native Vercel hosting uses the OIDC adapter described below. The proxy does not trust browser-supplied user IDs or authorization headers, and never follows upstream redirects. API responses are not cached. The shared backend credential is intended for this private single-workspace console, not tenant isolation.
 
 The hosted site starts without backend connection settings. Its demo works independently; the live workspace displays an explicit configuration message. It does not silently substitute sample data for real records. The Python telephony service remains a separate deployment.
 
@@ -35,7 +35,7 @@ The workspace now opens on Operations: configuration checks, recent call counts,
 
 The existing default scripts retain the Vinext/Sites build and identity boundary. Native Next.js is available with `npm run dev:next`, `npm run build:next`, and `npm run start:next`. Both builds are checked in CI. Run them sequentially: Next and Vinext generate the same ignored type declaration file. Native Next uses `tsconfig.next.json` and the existing Tailwind PostCSS dependency.
 
-Native Next deliberately denies live workspace access until a verified session adapter is implemented. It never trusts incoming Sites identity headers. Only the Sites Vite build defines the trusted-runtime marker, and that artifact still must run behind the trusted Sites dispatcher. Do not add the marker to a native deployment to bypass authentication. The landing page and fictional demo work in native Next without account setup.
+Native Next uses verified OIDC sessions and denies live workspace access until the provider and account allowlist are configured. It never trusts incoming Sites identity headers. Only the Sites Vite build defines the trusted-runtime marker, and that artifact still must run behind the trusted Sites dispatcher. Do not add the marker to a native deployment to bypass authentication. The landing page and fictional demo work in native Next without account setup.
 
 New dependencies: Next.js for the native App Router build and Motion for reduced-motion-aware status transitions. Tailwind v4, TypeScript, shadcn/Base UI, and Lucide remain the shared UI stack. A selective static Magic UI DotPattern adaptation is attributed in `THIRD_PARTY_NOTICES.md`; no separate Aceternity library or paid templates were added. [Next TypeScript configuration](https://nextjs.org/docs/app/api-reference/config/next-config-js/typescript), [Motion accessibility](https://motion.dev/docs/react-use-reduced-motion).
 
@@ -43,7 +43,7 @@ New dependencies: Next.js for the native App Router build and Motion for reduced
 
 The sidebar now includes Failure lab and Follow-up & feedback. `/demo?view=lab` presents saved, explicitly simulated comparisons; live authenticated workspaces run the Python policy harness through the console proxy. The demo queue is read-only. Live call timing includes percentile coverage and missing/invalid sample counts. Latency summaries can fail independently while the original stored turn values remain visible.
 
-Before using live workflows, apply the new Alembic migration with the backend's database connection: `alembic upgrade head`. It adds follow-up, regression-feedback, and audit tables. Back up any existing database first. No new dependencies were added in this iteration.
+Before using live workflows, apply the new Alembic migration with the backend's database connection: `alembic upgrade head`. It adds follow-up, regression-feedback, and audit tables. Back up any existing database first. That workflow iteration added no dependencies. Native sign-in subsequently adds openid-client and jose.
 
 Writes require same-origin JSON requests and a server-derived actor ID; the browser cannot choose the acting reviewer. Console credentials remain server-only. The backend bearer is a trusted service credential whose holder can assert actors, so never expose it to clients. Feedback creation uses a UUID idempotency key for the current form intent; matching retries return the original record. Refresh saved records after an uncertain response. A full browser reload loses an unsaved draft and its in-memory request key; inspect the queue before submitting a new intent. No writes are automatically retried.
 
@@ -53,8 +53,15 @@ Follow-up updates require the current revision. After a conflict, copy your draf
 
 Deploy from the `web/` directory. `vercel.json` explicitly selects the native Next.js build and `.next-native` output; the default Vinext scripts remain available for Sites. The deployment ignore file excludes local environment files and generated output. When importing the GitHub repository in Vercel, set the project Root Directory to `web`.
 
-The deployed `/demo` works without backend credentials. It includes fictional calls, evaluation examples, operations scenarios, saved failure comparisons, and a read-only queue preview. Native `/workspace` remains closed until a verified identity adapter is implemented. Deploying the frontend does not deploy the Python telephony service, database, or live failure-lab runner. Do not bypass the identity guard or expose the backend token in client environment variables.
+The deployed `/demo` works without backend credentials. It includes fictional calls, evaluation examples, operations scenarios, saved failure comparisons, and a read-only queue preview. Native `/workspace` remains closed until Google/OIDC configuration and account approval are complete. Deploying the frontend does not deploy the Python telephony service, database, or live failure-lab runner. Do not bypass the identity guard or expose the backend token in client environment variables.
 
 Vercel temporary deployment was verified with the native build. Prebuilt server tracing needs `.next-native` and dependency files, so do not explicitly exclude them in `.vercelignore`. Temporary deployments expire unless claimed in a Vercel account; claim links are account-control credentials and must not be committed. A permanent account deployment still requires a successful CLI login or dashboard import.
 
-The GitHub repository is public and connected to the permanent Vercel project `pramod-0491/arcagent`. Production tracks `main`, with Root Directory `web` and Node `22.x`. Pushes to `main` trigger Vercel builds using this directory's `vercel.json`. Local `.env.local` and `.vercel` account files remain ignored. The native identity guard still protects live records until a verified authentication adapter is supplied.
+The GitHub repository is public and connected to the permanent Vercel project `pramod-0491/arcagent`. Production tracks `main`, with Root Directory `web` and Node `22.x`. Pushes to `main` trigger Vercel builds using this directory's `vercel.json`. Local `.env.local` and `.vercel` account files remain ignored. The native identity guard protects live records using OIDC sessions and the explicit account allowlist.
+
+
+## Native Google sign-in and transfer evidence
+
+The Vercel authentication adapter is implemented. Configure the Google web OAuth client and encrypted-session variables in `.env.example`, then approve your signed-in account ID in `ARCAGENT_ALLOWED_USER_IDS`. See [the complete setup and live-call guide](../NATIVE_AUTH_AND_LIVE_VALIDATION.md). Missing configuration keeps the workspace locked; successful Google sign-in alone does not grant access. Native logout is a same-origin POST, while Sites keeps its dispatcher sign-out route.
+
+The real call detail screen distinguishes accepted transfer requests, uncertain requests, terminal failures, and confirmed call bridges. A bridge does not prove a human answered. Apply the current backend migration before using these records. See [cloud staging](../CLOUD_STAGING.md) for the separate Python/PostgreSQL deployment and its verified status.

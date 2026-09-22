@@ -6,7 +6,7 @@ Updated September 22, 2026. This is the practical handoff for the current reposi
 
 Read [the native sign-in and live-call guide](NATIVE_AUTH_AND_LIVE_VALIDATION.md) and [cloud staging](CLOUD_STAGING.md) first for this iteration. Native Google/OIDC sign-in is implemented with encrypted sessions and an account allowlist; Google client registration is still required. Transfer request acceptance remains pending until signed bridge evidence arrives. Failed and unresolved transfers have durable recovery and a bounded reconciliation command. The call detail UI now exposes those distinctions.
 
-Current local validation: **733 backend tests passed, one skipped; 40 frontend tests passed**. Python lint/format, TypeScript, native Next.js, and the existing Sites build pass. These results do not establish real phone-call latency or that a human coordinator answered. Google Cloud staging is being activated in an isolated project within the authorized low-usage budget; the cloud document records verified deployment state.
+Current local validation: **733 backend tests passed, one skipped; 40 frontend tests passed**. Python lint/format, TypeScript, native Next.js, and the existing Sites build pass. These results do not establish real phone-call latency or that a human coordinator answered. Google Cloud staging now has a deployed backend and migrated PostgreSQL database in an isolated project. Authenticated reads and synthetic workflow writes have been verified; the cloud document records resources, costs, and exact evidence. Real voice readiness remains blocked.
 
 ## Current position
 
@@ -17,7 +17,7 @@ The most immediate blockers are concrete:
 - All seven prompt files under `arcagent/agent/prompts/v1/` still contain `TODO_OWNER`.
 - `evals/personas/` contains a template and instructions, but no runnable owner personas. Test fixtures and delivery mutations are separate synthetic suites; they do not fill this gap.
 - Real speech/vendor interoperability, actual telephone latency, and production operational behavior have not been established by the offline tests.
-- Account access, spending limits, business policies, approved data, and independent labels require your decisions.
+- Google OAuth client registration, voice-vendor credentials and usage allowance, business policies, approved data, and independent labels remain owner inputs. The staging infrastructure budget and Google sign-in provider are already selected.
 
 Do not pay for a benchmark using the current placeholder prompts. Do not describe synthetic handoff or callback outcomes as completed external actions.
 

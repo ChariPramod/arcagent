@@ -51,6 +51,8 @@ The flow and registration steps are based on [Google OpenID Connect](https://dev
 
 ## Complete backend configuration
 
+The backend is deployed at `https://arcagent-staging-ydan5h6udq-uc.a.run.app` with a migrated persistent PostgreSQL database. Live checks verified health, rejection of unauthenticated console access, authenticated reads, and a synthetic follow-up create/retry/resolve/conflict/audit sequence. Runtime database privileges were checked separately from migration credentials. These checks establish cloud persistence, not real phone integration.
+
 See [CLOUD_STAGING.md](CLOUD_STAGING.md) for actual cloud resources, costs, deployment status, and teardown. Cloud infrastructure has a $20/month staging target. Speech, telephony, and model usage are separate and are not activated by this infrastructure budget.
 
 Before enabling calls, place the real provider configuration in Secret Manager and bind it to the backend revision: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_NUMBER`, `COORDINATOR_NUMBER`, `DEEPGRAM_API_KEY`, `CARTESIA_API_KEY`, `CARTESIA_VOICE_ID`, and `LLM_API_KEY`. Verify the configured model identifiers are available to your accounts. Keep the existing owner-approved vendor parameters unless deliberately reviewed.
@@ -103,8 +105,8 @@ The first command is read-only. The second creates bounded recovery work; neithe
 
 ## Validation in this iteration
 
-- Backend: `733 passed, 1 skipped in 8.44s`.
-- Python lint and format checks passed.
+- Backend: `733 passed, 1 skipped in 8.44s`. The opt-in vendor integration test remains skipped; no live vendor result is implied.
+- Python and frontend lint checks, plus Python formatting, passed. GitHub CI is green for the implementation.
 - Frontend: `40 passed, 0 failed`.
 - TypeScript, native Next.js production build, and the existing Sites build passed.
 - New dependencies: `openid-client` for standards-based OIDC and explicit ID-token signature verification; `jose` for authenticated encrypted cookies.
