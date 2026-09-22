@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_number: str = ""
     coordinator_number: str = ""
+    transfer_timeout_s: int = Field(default=30, ge=5, le=600)
     validate_twilio_signature: bool = True
     echo_enabled: bool = False
     enable_audio_evals: bool = False

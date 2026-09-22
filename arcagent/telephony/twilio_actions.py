@@ -15,6 +15,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
+from urllib.parse import urlsplit
+from uuid import UUID
+
+from twilio.base.exceptions import TwilioRestException
+from twilio.http.http_client import TwilioHttpClient
 
 from arcagent.config import Settings
 from arcagent.logging import get_logger, mask_number
@@ -36,7 +41,11 @@ class TwilioClient(Protocol):
 
 
 class TransferFailed(RuntimeError):
-    """The live call could not be updated. The caller is still on the line."""
+    """A transfer was rejected or its request outcome is unknown."""
+
+    def __init__(self, message: str, *, uncertain: bool = False) -> None:
+        super().__init__(message)
+        self.uncertain = uncertain
 
 
 class SmsFailed(RuntimeError):
@@ -80,11 +89,15 @@ class TwilioActions:
             from twilio.rest import Client
 
             self._client = Client(
-                self._settings.twilio_account_sid, self._settings.twilio_auth_token
+                self._settings.twilio_account_sid,
+                self._settings.twilio_auth_token,
+                http_client=TwilioHttpClient(timeout=10, max_retries=0),
             )
         return self._client
 
-    def warm_transfer(self, call_sid: str, coordinator_number: str | None = None) -> str:
+    def warm_transfer(
+        self, call_sid: str, coordinator_number: str | None = None, *, attempt_id: str
+    ) -> str:
         """Replace the live call's TwiML with a dial to the coordinator.
 
         Call this only after the handoff line has been spoken and its mark acknowledged.
@@ -97,12 +110,45 @@ class TwilioActions:
         if not number:
             raise TransferFailed("COORDINATOR_NUMBER is not configured")
 
-        twiml = dial_coordinator(number)
+        base = self._settings.public_url.rstrip("/")
+        try:
+            origin = urlsplit(base)
+            _port = origin.port  # Validate malformed ports before issuing a vendor request.
+        except ValueError:
+            raise TransferFailed(
+                "PUBLIC_URL must be an HTTPS origin for transfer callbacks"
+            ) from None
+        if (
+            origin.scheme != "https"
+            or not origin.hostname
+            or origin.username
+            or origin.password
+            or origin.query
+            or origin.fragment
+            or origin.path
+            or any(character.isspace() for character in base)
+        ):
+            raise TransferFailed("PUBLIC_URL must be an HTTPS origin for transfer callbacks")
+        try:
+            identifier = str(UUID(attempt_id))
+        except ValueError:
+            raise TransferFailed("Invalid transfer attempt") from None
+        callback = f"{base}/voice/transfer/{identifier}"
+        twiml = dial_coordinator(
+            number,
+            action_url=f"{callback}/action",
+            progress_url=f"{callback}/progress",
+            timeout=self._settings.transfer_timeout_s,
+        )
         try:
             self._get_client().calls(call_sid).update(twiml=twiml)
         except Exception as exc:
-            log.exception("warm_transfer_failed", call_sid=call_sid)
-            raise TransferFailed(str(exc)) from exc
+            rejected = isinstance(exc, TwilioRestException) and 400 <= exc.status < 500
+            log.warning("warm_transfer_request_failed", error_type=type(exc).__name__)
+            raise TransferFailed(
+                "Transfer request rejected" if rejected else "Transfer request outcome unknown",
+                uncertain=not rejected,
+            ) from None
 
         log.info("warm_transfer", call_sid=call_sid, coordinator_number=mask_number(number))
         return twiml

@@ -18,8 +18,9 @@ from arcagent.agent.state import LeadFields
 from arcagent.config import Settings
 from arcagent.logging import get_logger
 from arcagent.persistence.db import session_scope
-from arcagent.persistence.models import Outcome
+from arcagent.persistence.models import Call, Outcome
 from arcagent.persistence.repo import CallRepository
+from arcagent.telephony.transfer_state import TransferStateError, begin_transfer, mark_request
 from arcagent.telephony.twilio_actions import (
     SmsFailed,
     TransferFailed,
@@ -34,7 +35,7 @@ class RoutingResult:
     """What happened at the end of the call."""
 
     score: ScoreResult
-    outcome: Outcome
+    outcome: Outcome | None
     lead_id: int | None = None
     slot_start: datetime | None = None
     sms_sid: str | None = None
@@ -83,7 +84,7 @@ class CallRouter:
             )
 
         if result.decision is Decision.HANDOFF:
-            return await self._transfer(twilio_call_sid, result, lead_id)
+            return await self._transfer(call_id, twilio_call_sid, result, lead_id)
         return await self._callback(call_id, lead_id, fields, result, slot_start)
 
     # ------------------------------------------------------------- persistence
@@ -133,16 +134,60 @@ class CallRouter:
 
     # ----------------------------------------------------------------- actions
 
+    def _begin_transfer(self, call_id: int, twilio_call_sid: str) -> tuple[str, bool]:
+        with session_scope(self.database_url) as session:
+            call = session.get(Call, call_id)
+            if call is None or call.twilio_call_sid != twilio_call_sid:
+                raise TransferStateError("Transfer identity mismatch")
+            attempt, created = begin_transfer(session, call_id)
+            return attempt.id, created
+
+    def _mark_transfer(self, identifier: str, disposition: str) -> Outcome | None:
+        with session_scope(self.database_url) as session:
+            attempt = mark_request(session, identifier, disposition)
+            return session.get(Call, attempt.call_id).outcome
+
     async def _transfer(
-        self, twilio_call_sid: str, result: ScoreResult, lead_id: int | None
+        self, call_id: int, twilio_call_sid: str, result: ScoreResult, lead_id: int | None
     ) -> RoutingResult:
         try:
-            await asyncio.to_thread(self.actions.warm_transfer, twilio_call_sid)
-        except TransferFailed as exc:
-            return RoutingResult(
-                score=result, outcome=Outcome.ABANDONED, lead_id=lead_id, error=str(exc)
+            identifier, created = await asyncio.to_thread(
+                self._begin_transfer, call_id, twilio_call_sid
             )
-        return RoutingResult(score=result, outcome=Outcome.HANDOFF, lead_id=lead_id)
+        except (SQLAlchemyError, TransferStateError):
+            return RoutingResult(
+                score=result,
+                outcome=None,
+                lead_id=lead_id,
+                error="Transfer intent could not be persisted",
+            )
+        if not created:
+            return RoutingResult(
+                score=result,
+                outcome=None,
+                lead_id=lead_id,
+                error="Transfer already requested; awaiting reconciliation",
+            )
+        error = None
+        disposition = "accepted"
+        try:
+            await asyncio.to_thread(
+                self.actions.warm_transfer, twilio_call_sid, attempt_id=identifier
+            )
+        except TransferFailed as exc:
+            disposition = "uncertain" if exc.uncertain else "failed"
+            error = str(exc)
+        try:
+            outcome = await asyncio.to_thread(self._mark_transfer, identifier, disposition)
+        except SQLAlchemyError:
+            # Intent remains durable. Never repeat a possibly accepted vendor update.
+            return RoutingResult(
+                score=result,
+                outcome=None,
+                lead_id=lead_id,
+                error="Transfer requested but receipt persistence failed",
+            )
+        return RoutingResult(score=result, outcome=outcome, lead_id=lead_id, error=error)
 
     async def _callback(
         self,

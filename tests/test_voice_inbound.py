@@ -47,8 +47,16 @@ class TestTwiml:
         assert '<Stream url="wss://example.test/voice/stream" />' in xml
 
     def test_dial_coordinator_document(self) -> None:
-        xml = dial_coordinator("+15550001111")
-        assert "<Dial>+15550001111</Dial>" in xml
+        xml = dial_coordinator(
+            "+15550001111",
+            action_url="https://example.test/action",
+            progress_url="https://example.test/progress",
+            timeout=30,
+        )
+        assert ">+15550001111</Number>" in xml
+        assert 'action="https://example.test/action"' in xml
+        assert 'statusCallback="https://example.test/progress"' in xml
+        assert 'timeout="30"' in xml
 
 
 class TestInboundWebhook:

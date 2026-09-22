@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { hasTrustedSitesIdentity } from '@/lib/auth-runtime';
 import { useConversationTool } from '@/lib/use-conversation-tool';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import {
@@ -691,20 +692,28 @@ function SideNav({
               {demo ? 'Demo workspace' : userName}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {demo ? 'Explore at your own pace' : 'Signed in with ChatGPT'}
+              {demo ? 'Explore at your own pace' : 'Signed in securely'}
             </p>
           </div>
         </div>
-        {!demo && (
-          <Link
-            href="/signout-with-chatgpt?return_to=/"
-            target="_top"
-            className="text-xs text-muted-foreground inline-flex gap-2 mt-3"
-          >
-            <LogOut size={13} />
-            Sign out
-          </Link>
-        )}
+        {!demo &&
+          (hasTrustedSitesIdentity() ? (
+            <Link
+              href="/signout-with-chatgpt?return_to=/"
+              target="_top"
+              className="text-xs text-muted-foreground inline-flex gap-2 mt-3"
+            >
+              <LogOut size={13} />
+              Sign out
+            </Link>
+          ) : (
+            <form action="/auth/logout" method="post">
+              <button className="text-xs text-muted-foreground inline-flex gap-2 mt-3">
+                <LogOut size={13} />
+                Sign out
+              </button>
+            </form>
+          ))}
       </SidebarFooter>
     </Sidebar>
   );

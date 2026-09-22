@@ -19,7 +19,14 @@ import {
 import { LatencyReport } from '@/components/latency-report';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { CallDetail } from '@/lib/domain';
-import { date, display, duration, label, ruleLabels } from '@/lib/domain';
+import {
+  date,
+  display,
+  duration,
+  label,
+  ruleLabels,
+  transferDescription,
+} from '@/lib/domain';
 export function CallReview({
   call,
   onBack,
@@ -152,6 +159,43 @@ export function CallReview({
         )}
         <p className="text-sm mt-4 font-medium">{label(call.outcome)}</p>
       </div>
+      {!demo && call.transfer && (
+        <section
+          className="mt-6 rounded-xl border p-4"
+          aria-label="Transfer evidence"
+        >
+          <p className="eyebrow mb-3">Transfer evidence</p>
+          <h3 className="text-sm font-semibold">
+            {transferDescription(call.transfer)}
+          </h3>
+          <dl className="text-xs space-y-2 mt-3">
+            <div className="flex justify-between gap-3">
+              <dt>Request</dt>
+              <dd>{label(call.transfer.request_status)}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt>Latest call event</dt>
+              <dd>
+                {call.transfer.latest_progress
+                  ? label(call.transfer.latest_progress.status)
+                  : 'Not received'}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt>Evidence updated</dt>
+              <dd>{date(call.transfer.updated_at)}</dd>
+            </div>
+          </dl>
+          <p className="text-xs text-muted-foreground mt-4 leading-relaxed">
+            {call.transfer.connection_confirmed
+              ? 'Twilio confirmed a call bridge. This does not verify that a human coordinator answered; voicemail is still possible.'
+              : call.transfer.outcome ||
+                  call.transfer.request_status === 'uncertain'
+                ? 'Review the follow-up queue and the call before taking further action. This transfer is not automatically retried.'
+                : 'An accepted request is not a confirmed connection. Reopen this call after the signed result arrives.'}
+          </p>
+        </section>
+      )}
       <div className="mt-6">
         <h3 className="text-sm font-semibold mb-3">Why this score?</h3>
         {Object.entries(call.score_breakdown ?? {}).length ? (

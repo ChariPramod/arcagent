@@ -28,6 +28,7 @@ from arcagent.persistence.models import (
     Tier,
     Turn,
 )
+from arcagent.persistence.transfer_models import TransferAttempt
 
 log = get_logger(__name__)
 
@@ -93,9 +94,20 @@ class CallRepository:
         final_node: str | None = None,
         language: str | None = None,
     ) -> Call:
-        call = self.session.get(Call, call_id)
+        call = self.session.scalar(
+            select(Call)
+            .where(Call.id == call_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
         if call is None:
             raise LookupError(f"call {call_id} not found")
+        # Transfer callbacks own the terminal state. The session may close before
+        # callbacks arrive or after they commit; neither case may overwrite evidence.
+        if self.session.scalar(
+            select(TransferAttempt.id).where(TransferAttempt.call_id == call_id)
+        ):
+            return call
         call.ended_at = _now()
         started = call.started_at
         if started is not None:

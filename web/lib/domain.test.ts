@@ -40,3 +40,35 @@ void test('combined filters support case, whitespace, ids, and missing fields', 
   assert.deepEqual(filterCalls(calls, '', 'callback_booked', ''), []);
   assert.deepEqual(filterCalls(calls, '', 'all', '2026-09-07'), []);
 });
+
+import { transferDescription, type TransferEvidence } from './domain.ts';
+test('transfer copy requires positive bridge evidence and preserves uncertainty', () => {
+  const transfer: TransferEvidence = {
+    request_status: 'accepted',
+    outcome: null,
+    connection_confirmed: false,
+    human_identity_verified: false,
+    created_at: '',
+    updated_at: '',
+    resolved_at: null,
+    latest_progress: null,
+    timing_basis: 'server_observed',
+  };
+  assert.equal(transferDescription(transfer), 'Awaiting connection evidence');
+  assert.equal(
+    transferDescription({ ...transfer, request_status: 'uncertain' }),
+    'Transfer result uncertain',
+  );
+  assert.equal(
+    transferDescription({
+      ...transfer,
+      outcome: 'completed',
+      connection_confirmed: true,
+    }),
+    'Call bridge confirmed',
+  );
+  assert.notEqual(
+    transferDescription({ ...transfer, outcome: 'completed' }),
+    'Call bridge confirmed',
+  );
+});

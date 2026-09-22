@@ -55,7 +55,7 @@ async def validate_twilio_request(
 
     signature = request.headers.get(SIGNATURE_HEADER, "")
     form = await request.form()
-    params = {k: str(v) for k, v in form.items()}
+    params = form
     url = _public_request_url(request, settings)
 
     if not RequestValidator(settings.twilio_auth_token).validate(url, params, signature):

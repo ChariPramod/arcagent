@@ -163,3 +163,61 @@ def test_evaluation_snapshots_transcripts_and_regression_guards(console):
         == "invalid"
     )
     assert client.get("/api/console/evals?limit=1").json()["total"] == 3
+
+
+def test_transfer_evidence_excludes_vendor_ids_and_requires_bridge(console):
+    from arcagent.telephony.transfer_state import (
+        begin_transfer,
+        mark_request,
+        record_outcome,
+        record_progress,
+    )
+
+    client, url, _ = console
+    with session_scope(url) as session:
+        call = Call(twilio_call_sid="private-parent-identity", from_number_hash="hash")
+        session.add(call)
+        session.flush()
+        call_id = call.id
+        attempt, _ = begin_transfer(session, call_id)
+        attempt_id = attempt.id
+        mark_request(session, attempt_id, "accepted")
+        record_progress(
+            session,
+            attempt_id,
+            parent_call_sid="private-parent-identity",
+            child_call_sid="private-child-identity",
+            status="completed",
+            sequence=3,
+        )
+        record_progress(
+            session,
+            attempt_id,
+            parent_call_sid="private-parent-identity",
+            child_call_sid="private-child-identity",
+            status="ringing",
+            sequence=1,
+        )
+    data = client.get(f"/api/console/calls/{call_id}").json()["transfer"]
+    assert data["request_status"] == "accepted"
+    assert data["connection_confirmed"] is False
+    assert data["human_identity_verified"] is False
+    assert data["latest_progress"]["sequence"] == 3
+    assert data["latest_progress"]["status"] == "completed"
+    assert data["resolved_at"] is None
+    assert "private-" not in str(data)
+    assert "sid" not in str(data)
+    with session_scope(url) as session:
+        record_outcome(
+            session,
+            attempt_id,
+            parent_call_sid="private-parent-identity",
+            child_call_sid="private-child-identity",
+            outcome="completed",
+            connection_confirmed=True,
+        )
+    response = client.get(f"/api/console/calls/{call_id}")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["transfer"]["connection_confirmed"] is True
+    assert response.json()["transfer"]["human_identity_verified"] is False
+    assert response.json()["transfer"]["resolved_at"] is not None

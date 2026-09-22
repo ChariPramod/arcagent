@@ -18,7 +18,32 @@ export type Turn = {
   interrupted: boolean;
   latency: Record<string, number | null>;
 };
+export type TransferEvidence = {
+  request_status: string;
+  outcome: string | null;
+  connection_confirmed: boolean;
+  human_identity_verified: false;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  latest_progress: {
+    status: string;
+    sequence: number;
+    received_at: string;
+  } | null;
+  timing_basis: 'server_observed';
+};
+export function transferDescription(transfer: TransferEvidence): string {
+  if (transfer.connection_confirmed && transfer.outcome === 'completed')
+    return 'Call bridge confirmed';
+  if (transfer.outcome)
+    return `Transfer ${label(transfer.outcome).toLowerCase()}`;
+  if (transfer.request_status === 'uncertain')
+    return 'Transfer result uncertain';
+  return 'Awaiting connection evidence';
+}
 export type CallDetail = CallSummary & {
+  transfer?: TransferEvidence | null;
   fields: Record<string, unknown>;
   score_breakdown: Record<string, number>;
   decision: string | null;

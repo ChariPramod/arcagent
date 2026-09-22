@@ -1,6 +1,12 @@
 # ArcAgent build status and owner handoff
 
-Updated September 21, 2026. This is the practical handoff for the current repository, not a claim of production readiness. Read it alongside [the iteration log](ITERATION_PLAN.md), [controlled voice testing](VOICE_TESTING.md), [the data/cloud playbook](DATA_CLOUD_AND_VALIDATION_PLAYBOOK.md), and [website setup](web/SETUP.md).
+Updated September 22, 2026. This is the practical handoff for the current repository, not a claim of production readiness. Read it alongside [the iteration log](ITERATION_PLAN.md), [controlled voice testing](VOICE_TESTING.md), [the data/cloud playbook](DATA_CLOUD_AND_VALIDATION_PLAYBOOK.md), and [website setup](web/SETUP.md).
+
+## Latest implementation: native identity and verified transfer evidence
+
+Read [the native sign-in and live-call guide](NATIVE_AUTH_AND_LIVE_VALIDATION.md) and [cloud staging](CLOUD_STAGING.md) first for this iteration. Native Google/OIDC sign-in is implemented with encrypted sessions and an account allowlist; Google client registration is still required. Transfer request acceptance remains pending until signed bridge evidence arrives. Failed and unresolved transfers have durable recovery and a bounded reconciliation command. The call detail UI now exposes those distinctions.
+
+Current local validation: **733 backend tests passed, one skipped; 40 frontend tests passed**. Python lint/format, TypeScript, native Next.js, and the existing Sites build pass. These results do not establish real phone-call latency or that a human coordinator answered. Google Cloud staging is being activated in an isolated project within the authorized low-usage budget; the cloud document records verified deployment state.
 
 ## Current position
 

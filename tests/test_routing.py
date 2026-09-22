@@ -27,6 +27,7 @@ from arcagent.telephony.twilio_actions import (
 COORDINATOR = "+15550001111"
 TWILIO_NUMBER = "+15550002222"
 CALLER = "+14155550123"
+ATTEMPT = "de38285a-f144-4f71-a5e9-6f72cd681d48"
 
 
 class FakeCall:
@@ -77,6 +78,7 @@ def settings(**overrides: Any) -> Settings:
         "twilio_number": TWILIO_NUMBER,
         "twilio_account_sid": "AC_test",
         "twilio_auth_token": "token_test",
+        "public_url": "https://voice.example.test",
     }
     return Settings(_env_file=None, **(base | overrides))
 
@@ -84,27 +86,31 @@ def settings(**overrides: Any) -> Settings:
 class TestTransfer:
     def test_the_live_call_is_updated_with_dial_twiml(self) -> None:
         client = FakeTwilioClient()
-        twiml = TwilioActions(settings(), client).warm_transfer("CA_live")
+        twiml = TwilioActions(settings(), client).warm_transfer("CA_live", attempt_id=ATTEMPT)
         assert len(client.call_updates) == 1
         sid, kwargs = client.call_updates[0]
         assert sid == "CA_live"
         assert kwargs["twiml"] == twiml
-        assert f"<Dial>{COORDINATOR}</Dial>" in twiml
+        assert f">{COORDINATOR}</Number>" in twiml
+        assert f"/voice/transfer/{ATTEMPT}/action" in twiml
+        assert 'statusCallbackEvent="initiated ringing answered completed"' in twiml
 
     def test_an_explicit_number_overrides_the_configured_one(self) -> None:
         client = FakeTwilioClient()
-        twiml = TwilioActions(settings(), client).warm_transfer("CA_live", "+15559998888")
-        assert "<Dial>+15559998888</Dial>" in twiml
+        twiml = TwilioActions(settings(), client).warm_transfer(
+            "CA_live", "+15559998888", attempt_id=ATTEMPT
+        )
+        assert ">+15559998888</Number>" in twiml
 
     def test_no_configured_number_fails_loudly(self) -> None:
         actions = TwilioActions(settings(coordinator_number=""), FakeTwilioClient())
         with pytest.raises(TransferFailed, match="COORDINATOR_NUMBER"):
-            actions.warm_transfer("CA_live")
+            actions.warm_transfer("CA_live", attempt_id=ATTEMPT)
 
     def test_a_twilio_error_becomes_transfer_failed(self) -> None:
         actions = TwilioActions(settings(), FakeTwilioClient(fail_calls=True))
         with pytest.raises(TransferFailed):
-            actions.warm_transfer("CA_live")
+            actions.warm_transfer("CA_live", attempt_id=ATTEMPT)
 
 
 class TestCallbackSms:
@@ -203,7 +209,7 @@ class TestEndOfCallRouting:
 
         assert result.score.score == 75
         assert result.score.decision is Decision.HANDOFF
-        assert result.outcome is Outcome.HANDOFF
+        assert result.outcome is None
         assert result.succeeded
         assert len(client.call_updates) == 1
         assert client.messages_sent == []
@@ -248,7 +254,7 @@ class TestEndOfCallRouting:
         result = await router.finish_call(call_id, "CA_route", HOT)
 
         assert not result.succeeded
-        assert result.outcome is Outcome.ABANDONED
+        assert result.outcome is None  # transport errors may have applied the update
         session = factory()
         try:
             assert session.query(Lead).count() == 1
@@ -430,3 +436,74 @@ class TestAvailabilityEndpoint:
                 }
         finally:
             app.dependency_overrides.clear()
+
+
+async def test_repeated_transfer_dispatch_never_redials(routed):
+    from sqlalchemy import select
+
+    from arcagent.persistence.models import Call
+    from arcagent.persistence.transfer_models import TransferAttempt
+
+    router, client, call_id, factory = routed()
+    first = await router.finish_call(call_id, "CA_route", HOT)
+    second = await router.finish_call(call_id, "CA_route", HOT)
+    assert first.outcome is second.outcome is None
+    assert len(client.call_updates) == 1
+    with factory() as db:
+        assert db.scalar(select(TransferAttempt)).request_status == "accepted"
+        assert db.get(Call, call_id).outcome is None
+        CallRepository(db).end_call(call_id, Outcome.ABANDONED)
+        assert db.get(Call, call_id).outcome is None
+        assert db.get(Call, call_id).ended_at is None
+
+
+async def test_uncertain_request_is_queued_for_review_not_retried(routed):
+    from sqlalchemy import select
+
+    from arcagent.persistence.transfer_models import TransferAttempt
+    from arcagent.persistence.workflow_models import FollowupTask
+
+    router, client, call_id, factory = routed(FakeTwilioClient(fail_calls=True))
+    await router.finish_call(call_id, "CA_route", HOT)
+    await router.finish_call(call_id, "CA_route", HOT)
+    with factory() as db:
+        assert db.scalar(select(TransferAttempt)).request_status == "uncertain"
+        assert len(list(db.scalars(select(FollowupTask)))) == 1
+    assert client.messages_sent == []
+
+
+async def test_invalid_callback_origin_prevents_vendor_request(routed):
+    from sqlalchemy import select
+
+    from arcagent.persistence.transfer_models import TransferAttempt
+
+    router, client, call_id, factory = routed(public_url="http://insecure.example.test")
+    result = await router.finish_call(call_id, "CA_route", HOT)
+    assert result.outcome is Outcome.ABANDONED
+    assert client.call_updates == []
+    with factory() as db:
+        assert db.scalar(select(TransferAttempt)).request_status == "failed"
+
+
+def test_explicit_vendor_rejection_differs_from_transport_uncertainty():
+    from twilio.base.exceptions import TwilioRestException
+
+    class Rejected(FakeTwilioClient):
+        def calls(self, sid):
+            raise TwilioRestException(400, "/test", msg="sensitive vendor response")
+
+    with pytest.raises(TransferFailed) as caught:
+        TwilioActions(settings(), Rejected()).warm_transfer("CA_live", attempt_id=ATTEMPT)
+    assert not caught.value.uncertain
+    assert "sensitive" not in str(caught.value)
+
+
+def test_transport_timeout_is_uncertain_without_sensitive_error():
+    class TimedOut(FakeTwilioClient):
+        def calls(self, sid):
+            raise TimeoutError("sensitive vendor response")
+
+    with pytest.raises(TransferFailed) as caught:
+        TwilioActions(settings(), TimedOut()).warm_transfer("CA_live", attempt_id=ATTEMPT)
+    assert caught.value.uncertain
+    assert "sensitive" not in str(caught.value)

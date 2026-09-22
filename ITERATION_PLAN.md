@@ -1,5 +1,14 @@
 # ArcAgent iterative delivery plan
 
+## September 22: native auth, transfer evidence, and cloud staging
+
+Implemented standards-based native OIDC authentication for the Vercel website, with Google selected by the owner, encrypted short-lived cookies, issuer/client-bound identity, explicit access approval, same-origin logout, and invalid-token regression tests. Preserved Sites identity separately. Implemented durable transfer intent, signed result/progress callbacks, no-answer/unbridged recovery, uncertain-request handling, finalization protection, transfer evidence in the console, and a dry-run-first reconciliation command. Added PostgreSQL migration and deployment source allowlisting.
+
+The owner approved the documented Twilio callback parameters and a $20/month staging infrastructure budget. Google Cloud resources use an isolated ArcAgent project. See [CLOUD_STAGING.md](CLOUD_STAGING.md) for actual deployment and budget status. See [NATIVE_AUTH_AND_LIVE_VALIDATION.md](NATIVE_AUTH_AND_LIVE_VALIDATION.md) for authentication setup, evidence semantics, tests, limitations, and the controlled-call acceptance matrix.
+
+Remaining gates: register Google OAuth client and approve operator identity; complete owner prompts/personas and clinic policies; configure real vendor credentials and numbers; execute observed answered/no-answer/voicemail trials; establish latency coverage and perceived-response measurements. A confirmed bridge does not prove a human answered. Automatic stale reconciliation and durable per-session revocation remain future work.
+
+
 Started September 20, 2026. Continues the data/cloud/validation playbook. The user authorized choosing priorities, delegating work, and implementing them.
 
 ## Completed iteration: make controlled voice testing trustworthy

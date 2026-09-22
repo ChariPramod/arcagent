@@ -26,8 +26,8 @@ from tests.test_routing import FakeTwilioClient
 @pytest.mark.parametrize(
     ("available", "reject_transfer", "disconnect", "expected"),
     [
-        (True, False, False, Outcome.HANDOFF),
-        (True, True, False, Outcome.ABANDONED),
+        (True, False, False, None),
+        (True, True, False, None),
         (False, False, False, Outcome.CALLBACK_BOOKED),
         (True, False, True, Outcome.ABANDONED),
     ],
@@ -48,6 +48,7 @@ async def test_controlled_call_persists_actual_routing_outcome(
         twilio_number="+15550002222",
         twilio_account_sid="AC_test",
         twilio_auth_token="test",
+        public_url="https://voice.example.test",
     )
     start = start_message()
     start["start"]["customParameters"] = {"from": "+15550000123"}
@@ -136,7 +137,7 @@ async def test_controlled_call_persists_actual_routing_outcome(
         with session_scope(url) as db:
             call = db.get(Call, sink.call_id)
             assert call.outcome is expected
-            assert call.ended_at is not None
+            assert (call.ended_at is None) is (expected is None)
             assert call.from_number_hash and not call.from_number_hash.startswith("+")
             turns = list(db.scalars(select(Turn).where(Turn.call_id == call.id)))
             assert any(t.speaker.value == "caller" for t in turns)
@@ -161,6 +162,44 @@ async def test_controlled_call_persists_actual_routing_outcome(
                 assert len(callbacks) == (0 if available else 1)
                 assert len(client.call_updates) == (1 if available and not reject_transfer else 0)
                 assert len(client.messages_sent) == (0 if available else 1)
+        if available and not disconnect and not reject_transfer:
+            # REST acceptance above is deliberately unresolved. Only a signed
+            # callback with bridge evidence makes this a confirmed handoff.
+            from fastapi.testclient import TestClient
+            from twilio.request_validator import RequestValidator
+
+            from arcagent.app import app
+            from arcagent.config import get_settings
+            from arcagent.persistence.transfer_models import TransferAttempt
+
+            with session_scope(url) as db:
+                attempt = db.scalar(
+                    select(TransferAttempt).where(TransferAttempt.call_id == sink.call_id)
+                )
+                path = f"/voice/transfer/{attempt.id}/action"
+            body = {
+                "AccountSid": settings.twilio_account_sid,
+                "CallSid": sink.twilio_call_sid,
+                "DialCallSid": "CA_controlled_child",
+                "DialCallStatus": "completed",
+                "DialBridged": "true",
+            }
+            signature = RequestValidator(settings.twilio_auth_token).compute_signature(
+                settings.public_url + path, body
+            )
+            app.dependency_overrides[get_settings] = lambda: settings
+            try:
+                with TestClient(app) as http:
+                    assert (
+                        http.post(
+                            path, data=body, headers={"X-Twilio-Signature": signature}
+                        ).status_code
+                        == 200
+                    )
+            finally:
+                app.dependency_overrides.clear()
+            with session_scope(url) as db:
+                assert db.get(Call, sink.call_id).outcome is Outcome.HANDOFF
     finally:
         ack_task.cancel()
         await asyncio.gather(ack_task, return_exceptions=True)

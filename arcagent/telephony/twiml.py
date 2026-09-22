@@ -25,10 +25,16 @@ def connect_stream(stream_url: str, parameters: dict[str, str] | None = None) ->
     return str(response)
 
 
-def dial_coordinator(number: str) -> str:
+def dial_coordinator(number: str, *, action_url: str, progress_url: str, timeout: int) -> str:
     """Warm transfer: replace the live call's TwiML with a dial to the coordinator."""
     response = VoiceResponse()
-    response.dial(number)
+    dial = response.dial(action=action_url, method="POST", timeout=timeout)
+    dial.number(
+        number,
+        status_callback=progress_url,
+        status_callback_method="POST",
+        status_callback_event="initiated ringing answered completed",
+    )
     return str(response)
 
 

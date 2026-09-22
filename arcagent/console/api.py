@@ -17,6 +17,7 @@ from arcagent.config import Settings, get_settings
 from arcagent.persistence.db import session_scope
 from arcagent.persistence.models import Call, EvalResult, EvalRun, Lead, Outcome
 from arcagent.persistence.repo import EvalRepository
+from arcagent.persistence.transfer_models import TransferAttempt, TransferProgress
 from evals import metrics
 from evals.compare_runs import (
     NOISE_FLOOR,
@@ -106,6 +107,38 @@ def calls(
     }
 
 
+def transfer_evidence(session: Session, call_id: int) -> dict[str, Any] | None:
+    """Expose evidence without vendor identities or a claim of human verification."""
+    attempt = session.scalar(select(TransferAttempt).where(TransferAttempt.call_id == call_id))
+    if attempt is None:
+        return None
+    progress = session.scalar(
+        select(TransferProgress)
+        .where(TransferProgress.attempt_id == attempt.id)
+        .order_by(TransferProgress.sequence.desc())
+        .limit(1)
+    )
+    return {
+        "request_status": attempt.request_status,
+        "outcome": attempt.outcome,
+        "connection_confirmed": attempt.outcome == "completed",
+        "human_identity_verified": False,
+        "created_at": iso(attempt.created_at),
+        "updated_at": iso(attempt.updated_at),
+        "resolved_at": iso(attempt.resolved_at),
+        "latest_progress": (
+            {
+                "status": progress.status,
+                "sequence": progress.sequence,
+                "received_at": iso(progress.received_at),
+            }
+            if progress
+            else None
+        ),
+        "timing_basis": "server_observed",
+    }
+
+
 @router.get("/calls/{call_id}")
 def call_detail(
     call_id: Annotated[int, Path(gt=0, le=2_147_483_647)], session: Database
@@ -139,6 +172,7 @@ def call_detail(
     return {
         **call_summary(call),
         "fields": fields,
+        "transfer": transfer_evidence(session, call_id),
         "score_breakdown": score.score_breakdown if score else {},
         "decision": str(score.decision) if score else None,
         "turns": [

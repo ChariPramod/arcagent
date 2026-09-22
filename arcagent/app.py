@@ -33,6 +33,7 @@ from arcagent.telephony.security import (
     validate_twilio_websocket,
 )
 from arcagent.telephony.session_handler import TwilioWebSocket, run_echo_session
+from arcagent.telephony.transfer_webhooks import router as transfer_router
 from arcagent.telephony.twiml import connect_stream
 
 log = get_logger(__name__)
@@ -53,6 +54,7 @@ app.include_router(console_router)
 
 app.include_router(workbench_router)
 app.include_router(workflows_router)
+app.include_router(transfer_router)
 
 
 @app.get("/health")
@@ -230,7 +232,8 @@ async def _finish_call(
         fields=responder.fields,
         consent_turn_index=sink.turn_index,
     )
-    await sink.close(result.outcome, final_node=responder.node_name)
+    if result.outcome is not None:
+        await sink.close(result.outcome, final_node=responder.node_name)
     log.info(
         "call_ended",
         outcome=str(result.outcome),

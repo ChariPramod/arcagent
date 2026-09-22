@@ -13,7 +13,7 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from arcagent.config import get_settings
-from arcagent.persistence import workflow_models  # noqa: F401
+from arcagent.persistence import transfer_models, workflow_models  # noqa: F401
 from arcagent.persistence.models import Base
 
 config = context.config
