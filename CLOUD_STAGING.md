@@ -148,3 +148,26 @@ The data-health check used a preview limit of `2`, reported database available a
 The existing resource configuration was verified after deployment: Cloud Run maximum instances `1`, concurrency `4`, `512 MiB` memory, CPU throttling enabled and startup CPU boost disabled; Cloud SQL `db-f1-micro`, `10 GiB` storage, automatic storage growth disabled. Existing jobs, service identities and secret bindings were reused. No additional infrastructure resource was provisioned. The spending budget is still alert-based and is not a hard billing cap. Voice readiness remained false and automatic integration delivery remained disabled.
 
 Both jobs experienced platform startup waits before completing. No duplicate execution was launched while waiting. See [STORAGE_AND_QUERY_OPTIMIZATION.md](STORAGE_AND_QUERY_OPTIMIZATION.md) for reproducible local query-plan evidence, bounded retention semantics and limits on the performance claims.
+
+## Operator workflow release, October 2, 2026 Pacific
+
+Source commit `8b3007857e5255ad22199343d1375261e82e026a` is deployed to the existing backend. Cloud operations completed on October 3 UTC. This release adds private-body enquiry search, bounded staff activity, append-only human CRM review evidence, and explicit stale-dispatch recovery. The review records preserve provider status; a human review does not prove a new delivery or authorize a resend.
+
+Release evidence:
+
+- Upload manifest: `115` allowlisted source files, with local environment, key and database artifacts excluded.
+- Cloud Build: `aa25413c-242a-4c34-8067-787376c81143`, successful.
+- Immutable image used by migration and runtime: `us-central1-docker.pkg.dev/arcagent-staging-20260922/arcagent/backend@sha256:c43f617991f20cd84d7fb4cf99e7b3cdcea4948285d755fc8f393c7b293b4533`.
+- Migration execution: `arcagent-migrate-zxfng`, successful. Schema revision is `h16de235ef78`.
+- Serving revision: `arcagent-staging-00006-b5t`, receiving all traffic at the existing origin.
+- Storage execution: `arcagent-storage-smoke-669nz`, successful. Its structured log confirms `schema: h16de235ef78`, `runtime_elevated: false`, and reuse of synthetic call `1`.
+
+The migration adds the review table and initializes the delivery review revision without changing existing provider outcomes, payloads or contact records. The existing backup and schema-preserving rollback guidance above still applies. Downgrading after staff have recorded reviews would discard that evidence; prefer rolling application code back while retaining the additive schema.
+
+Authenticated live checks verified name search, exact single-digit call-ID search, literal wildcard handling, no-match results, and combined owner/due filters with consistent summary counts. Search terms were sent only in JSON bodies. Invalid sensitive input returned a sanitized HTTP 422. Existing synthetic data yielded one name/ID match, no literal-wildcard or missing-name matches, and one unscheduled unassigned-owner enquiry.
+
+The activity endpoint returned a bounded first page, and its next cursor returned only older audit IDs. Historical contact and note values were omitted from the activity changes payload. Unauthenticated search, activity and review-history requests returned HTTP 401. Missing calls and delivery-review targets returned HTTP 404. Authenticated console responses retained `Cache-Control: no-store`.
+
+The delivery list remained empty, so review-history existence and authentication were checked without creating a delivery fixture or writing a human review. Nonempty review concurrency, idempotency and provider-status preservation are covered by the local tests and the fictional browser workflow, not claimed as a live CRM validation. No stale-dispatch recovery, external CRM send, phone operation or applying retention command was invoked during deployment. The storage preview remained available with no eligible candidates, voice readiness remained false, and automatic delivery remained disabled.
+
+Existing jobs, identities, secrets and infrastructure were reused. Cloud Run still has maximum instances `1`, concurrency `4`, `512 MiB` memory, CPU throttling enabled and startup boost disabled. Cloud SQL remains `db-f1-micro` with `10 GiB` storage and automatic growth disabled. No additional infrastructure resource was provisioned. The alert-based staging budget remains unchanged and is not a hard billing cap. Both one-off jobs completed after normal platform startup waits; no duplicate execution was launched.

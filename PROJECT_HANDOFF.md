@@ -12,7 +12,7 @@ Verification: **875 backend tests passed, 1 skipped; 48 frontend tests passed**.
 
 Read [the operator walkthrough](OPERATOR_WORKFLOW.md) and [CRM review contract](INTEGRATION_REVIEW.md). **Owner actions:** complete the deferred Google registration; activate one receiver and investigate its real acknowledgements; assign a staff exception owner; approve operational data and retention policies. The product still needs controlled live-call evidence before being sold as an autonomous receptionist. No external CRM request, real call, or transcript redaction was used for this release's verification.
 
-Deployment evidence for this iteration is recorded in [cloud staging](CLOUD_STAGING.md); the release entry will be updated after rollout verification.
+Website release `8b30078` is live on [Vercel](https://arcagent-beige.vercel.app/demo?view=group). The deployed search and uncertainty-review flow were verified in the browser. Unsigned search, activity, review, and recovery requests return unauthorized; live records remain behind the deferred identity setup. GitHub CI passed backend, website, and image jobs. Cloud Run revision `arcagent-staging-00006-b5t` serves the same code after migration `h16de235ef78`. Live authenticated search/activity checks and the restricted-runtime database smoke passed. Exact deployment evidence is recorded in [cloud staging](CLOUD_STAGING.md).
 
 
 ## October 2: architecture, queries, and retention follow-up
