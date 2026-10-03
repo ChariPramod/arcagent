@@ -104,3 +104,24 @@ GitHub pushes automatically update the Vercel frontend only. The Cloud Run backe
 ```
 
 These updates deliberately preserve existing runtime environment settings, secret version references, service identities, scaling limits, database integration, and the migration command. The migration job uses its separate schema credential; the runtime continues using the restricted application credential. Record the resulting build ID and resolved image digest, then verify liveness, rejected unauthenticated access, authenticated operations, schema revision, and a permitted workflow. A new secret version does not activate automatically because bindings are pinned; rotate secrets explicitly and verify before disabling old versions. Update the storage smoke helper's expected schema revision deliberately when adding a migration. Its synthetic fixture belongs only in staging.
+
+## Group pilot release, October 2, 2026
+
+The backend now serves source commit `aacd518`, including location management, the lead conversion pipeline, audited contact corrections, pilot readiness, and the integration outbox. This is one shared dental-group workspace; location filters do not enforce tenant or staff access isolation. Existing inbound calls are not automatically routed or assigned to a location.
+
+Release evidence:
+
+- Full backend verification: `797 passed, 1 skipped`; Ruff lint and formatting passed across `176` files.
+- Explicit upload manifest: `107` files, with local environment files, credentials, databases, and `.DS_Store` metadata excluded.
+- Cloud Build: `a9e77901-22e5-42d5-a8d7-822c0b2b541c`, successful.
+- Image: `us-central1-docker.pkg.dev/arcagent-staging-20260922/arcagent/backend@sha256:0e83be009241a6e93a347fc1a69dbe62062fd7e766d5de2293bae4219d1954d7`.
+- Pre-migration backup: `1790931600000`, successful, completed October 2 at 11:51 UTC.
+- Migration execution: `arcagent-migrate-kvkpm`, successful. The new tables are additive; rolling back application code should retain the schema. Downgrading these migrations would discard location, conversion, audit, and queued-delivery records.
+- Serving revision: `arcagent-staging-00004-szn`, receiving all traffic at the existing backend origin.
+- Storage execution: `arcagent-storage-smoke-pmmp9`, successful; its structured output confirms schema `f94be013cd56`, `runtime_elevated: false`, and reuse of synthetic call `1`.
+
+Authenticated live HTTP checks passed for pipeline, locations, pipeline audit, operations, integrations, deliveries, and pilot readiness. A permitted synthetic contact/stage/location correction committed successfully; a stale revision was rejected with HTTP 409. Location-filtered counts were verified. The synthetic enquiry's original stage and assignment were restored, and the temporary synthetic location was archived. These operations left an explicit audit trail. Public liveness returned HTTP 200; unauthenticated pipeline access returned HTTP 401.
+
+After cleanup, pilot readiness reported no active locations and one unassigned synthetic enquiry. Both integration destinations remained unconfigured, automatic delivery remained disabled, and the delivery list was empty. No CRM dispatch, telephone call, SMS, transcription, model, or synthesized speech operation was performed. Contact corrections affect future queued snapshots; they do not rewrite an already queued integration payload.
+
+The existing Cloud SQL instance remains `db-f1-micro`, with `10 GiB` storage and automatic storage growth disabled. Deployment reused existing services, jobs, identities, and secrets without provisioning additional resources. The earlier alerts-only budget limitation still applies. Migration and smoke jobs experienced platform startup delays before running successfully; no duplicate executions were launched in response.

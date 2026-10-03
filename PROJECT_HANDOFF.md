@@ -14,6 +14,8 @@ CRM hand-offs use a durable queue with immutable contact/location snapshots, exp
 4. Verify a fictional contact through queue, explicit send, and the destination's own record. A webhook acknowledgement does not establish downstream follow-up completion. No real external delivery was performed during implementation.
 5. Use [COMMERCIAL_PILOT_PLAN.md](COMMERCIAL_PILOT_PLAN.md) for the two-day acceptance checklist and demo sequence. Position the offer as a supervised enquiry follow-up pilot until live voice gates pass.
 
+Website release: commit `aacd518` is deployed to [the public fictional group demo](https://arcagent-beige.vercel.app/demo?view=group). GitHub CI passed backend, website, and staging-image jobs. Live unsigned requests to pipeline and integration APIs return unauthorized; the workspace correctly requires the deferred Google setup. Backend migration and revision evidence is recorded in [CLOUD_STAGING.md](CLOUD_STAGING.md).
+
 Local release verification: **797 backend tests passed, 1 skipped; 43 frontend tests passed**. Ruff, frontend typecheck/lint, native Next.js and Vinext builds passed. Browser walkthrough verified fictional location assignment, contact correction, CRM queueing and simulated receipt. External receiver behavior remains unverified.
 
 No additional runtime dependencies or cloud services are needed for this iteration. Existing voice prompts, independent personas, provider setup, observed phone trials, backup/restore evidence, and production access/retention review remain required before live patient operation.
