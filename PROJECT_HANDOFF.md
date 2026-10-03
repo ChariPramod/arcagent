@@ -10,6 +10,8 @@ The read-only **Data health** tab previews eligible transcript text without retu
 
 Call lists now select only the latest contact/score summaries, evaluation lists aggregate scalar results without transcript/configuration payloads, and indexes support ordering and latest-row lookup. Synthetic query evidence and limitations are in [STORAGE_AND_QUERY_OPTIMIZATION.md](STORAGE_AND_QUERY_OPTIMIZATION.md). These changes reduce work; production latency, storage savings, and capacity have not been benchmarked. Selected-record details still return their full evidence, without transcript-level cursor pagination.
 
+Website release `ecfbc2a` is live on [Vercel](https://arcagent-beige.vercel.app/demo?view=group). The deployed filters and Data health view were checked in the browser; protected storage and pipeline requests reject unsigned access. GitHub CI passed backend, website, and container-image jobs. Backend revision and migration evidence is recorded in [CLOUD_STAGING.md](CLOUD_STAGING.md).
+
 Verification: **821 backend tests passed, 1 skipped; 45 frontend tests passed**. Ruff, TypeScript, frontend lint, native Next.js and Vinext builds passed. A browser walkthrough verified combined overdue/owner filters and the read-only Data health view. All architecture diagrams rendered successfully.
 
 **Owner actions:** review the retention policy and preview before any apply or scheduling; complete the deferred Google and CRM activation; verify the first external test delivery and real-call acceptance cases. Retention does not erase backups, provider copies, evaluation transcripts, extracted fields, or contact snapshots. No new dependencies or cloud services are required.

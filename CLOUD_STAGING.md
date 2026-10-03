@@ -125,3 +125,26 @@ Authenticated live HTTP checks passed for pipeline, locations, pipeline audit, o
 After cleanup, pilot readiness reported no active locations and one unassigned synthetic enquiry. Both integration destinations remained unconfigured, automatic delivery remained disabled, and the delivery list was empty. No CRM dispatch, telephone call, SMS, transcription, model, or synthesized speech operation was performed. Contact corrections affect future queued snapshots; they do not rewrite an already queued integration payload.
 
 The existing Cloud SQL instance remains `db-f1-micro`, with `10 GiB` storage and automatic storage growth disabled. Deployment reused existing services, jobs, identities, and secrets without provisioning additional resources. The earlier alerts-only budget limitation still applies. Migration and smoke jobs experienced platform startup delays before running successfully; no duplicate executions were launched in response.
+
+## Architecture, query and retention release, October 2, 2026 Pacific
+
+Source commit `ecfbc2aa5879ae10ea05bf944199298d47f8dcc0` is deployed to the existing staging service. Cloud operations completed on October 3 UTC. The release adds server-side staff work filters, reduced summary-query payloads, focused indexes, and a read-only retention preview. Transcript redaction remains an explicitly invoked operator command; no applying retention operation was run for this release.
+
+Release evidence:
+
+- Upload manifest: `111` allowlisted source files; environment files, database files, credentials and key artifacts were excluded.
+- Cloud Build: `9ddafa21-235f-4701-9f89-14c2dd8e001a`, successful.
+- Image: `us-central1-docker.pkg.dev/arcagent-staging-20260922/arcagent/backend@sha256:c415ae7075223651670ff91caf463c4c76c1438ff9995acfd7378cab1607c6af`.
+- Migration execution: `arcagent-migrate-59zfr`, successful, using the existing migration identity. Schema revision is `g05cf124de67`.
+- Serving revision: `arcagent-staging-00005-79h`, receiving all traffic at the existing backend origin.
+- Storage execution: `arcagent-storage-smoke-s4cwn`, successful. Its structured log confirms `schema: g05cf124de67`, `runtime_elevated: false`, and reuse of synthetic call `1`.
+
+The migration adds a nullable redaction marker and indexes, replaces redundant prefix indexes, and does not redact transcript content or delete call records. The most recent recorded successful database backup remains `1790931600000` from the earlier group-pilot release. Code rollback must retain the newer schema; dropping the marker after an operator later uses retention would discard redaction-time evidence without restoring cleared text.
+
+Authenticated live checks passed for storage preview, pipeline, overdue/scheduled/unscheduled queues, unassigned-owner filtering, call list/detail, evaluation list, operations and integration configuration. Invalid due/owner values returned HTTP 422. Public liveness returned HTTP 200; unauthenticated storage and pipeline requests returned HTTP 401. Authenticated console responses retained `Cache-Control: no-store`.
+
+The data-health check used a preview limit of `2`, reported database available and no eligible transcript candidates, and returned `physical_storage_bytes: null` with `automation: manual_only`. The database contained one existing synthetic call/enquiry, with one unscheduled and unassigned-owner enquiry. Overdue and scheduled queues were empty. The saved evaluation list was empty, so nonempty aggregate metric parity is covered by local tests rather than claimed as a live-data performance result. No real contact information was created for these checks, and no external CRM, phone, SMS, speech or model operation was dispatched.
+
+The existing resource configuration was verified after deployment: Cloud Run maximum instances `1`, concurrency `4`, `512 MiB` memory, CPU throttling enabled and startup CPU boost disabled; Cloud SQL `db-f1-micro`, `10 GiB` storage, automatic storage growth disabled. Existing jobs, service identities and secret bindings were reused. No additional infrastructure resource was provisioned. The spending budget is still alert-based and is not a hard billing cap. Voice readiness remained false and automatic integration delivery remained disabled.
+
+Both jobs experienced platform startup waits before completing. No duplicate execution was launched while waiting. See [STORAGE_AND_QUERY_OPTIMIZATION.md](STORAGE_AND_QUERY_OPTIMIZATION.md) for reproducible local query-plan evidence, bounded retention semantics and limits on the performance claims.
