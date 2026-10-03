@@ -18,10 +18,12 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -60,6 +62,10 @@ class Tier(enum.StrEnum):
 
 class Call(Base):
     __tablename__ = "calls"
+    __table_args__ = (
+        Index("ix_calls_started_id", "started_at", "id"),
+        Index("ix_calls_outcome_started_id", "outcome", "started_at", "id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     twilio_call_sid: Mapped[str] = mapped_column(String(64), unique=True, index=True)
@@ -77,12 +83,21 @@ class Call(Base):
 
 class Turn(Base):
     __tablename__ = "turns"
+    __table_args__ = (
+        Index(
+            "ix_turns_pending_transcript_id",
+            "id",
+            postgresql_where=text("transcript_redacted_at IS NULL"),
+            sqlite_where=text("transcript_redacted_at IS NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     call_id: Mapped[int] = mapped_column(ForeignKey("calls.id", ondelete="CASCADE"), index=True)
     turn_index: Mapped[int] = mapped_column(Integer)
     speaker: Mapped[Speaker] = mapped_column(Enum(Speaker, name="turn_speaker"))
     text: Mapped[str] = mapped_column(Text, default="")
+    transcript_redacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Latency budget, milliseconds. Null means the stage did not run on this turn.
@@ -99,9 +114,10 @@ class Turn(Base):
 
 class Lead(Base):
     __tablename__ = "leads"
+    __table_args__ = (Index("ix_leads_call_id_id", "call_id", "id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    call_id: Mapped[int] = mapped_column(ForeignKey("calls.id", ondelete="CASCADE"), index=True)
+    call_id: Mapped[int] = mapped_column(ForeignKey("calls.id", ondelete="CASCADE"))
     name: Mapped[str | None] = mapped_column(String(128))
     callback_number: Mapped[str | None] = mapped_column(String(32))
     preferred_time: Mapped[str | None] = mapped_column(String(64))
@@ -131,9 +147,10 @@ class Lead(Base):
 
 class LeadScore(Base):
     __tablename__ = "lead_scores"
+    __table_args__ = (Index("ix_lead_scores_lead_id_id", "lead_id", "id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id", ondelete="CASCADE"), index=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id", ondelete="CASCADE"))
     score: Mapped[int] = mapped_column(Integer)
     threshold_used: Mapped[int] = mapped_column(Integer)
     decision: Mapped[Decision] = mapped_column(Enum(Decision, name="score_decision"))

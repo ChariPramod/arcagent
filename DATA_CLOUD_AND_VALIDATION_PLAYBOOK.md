@@ -147,7 +147,7 @@ Use separate development, staging, and eventual production databases, credential
 
 Migrations change schema; imports and live calls create data. Deploying code, migrating schema, and uploading records are different operations. There is no need to upload records before the application exists. Back up a database before risky migrations, test restoring the backup, and promote code rather than copying a production database into development.
 
-The current purge script deletes old live-call turns. It does **not** delete lead records, evaluation transcripts, source snapshots, exports, logs, vendor copies, or backups. Add lifecycle policies for each store. Run its dry-run mode before scheduling actual deletion. [Retention implementation](scripts/purge_old_data.py).
+The retention script defaults to a bounded dry-run preview. Explicit `--apply` clears transcript text from completed calls past the retention window, retaining turn rows and latency with a redaction timestamp. It does **not** remove lead records, staff notes, audit content, CRM snapshots and idempotency evidence, evaluation transcripts, source snapshots, exports, logs, vendor copies, or backups. Each store needs its own approved lifecycle policy. Scheduling and missed-run alerts remain operator work. [Retention implementation](scripts/purge_old_data.py) and [operator guide](STORAGE_AND_QUERY_OPTIMIZATION.md).
 
 ## When to deploy, and what to deploy
 

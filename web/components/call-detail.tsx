@@ -83,7 +83,13 @@ export function CallReview({
                         <Badge variant="outline">Interrupted</Badge>
                       )}
                     </div>
-                    <p className="turn-text">{turn.text}</p>
+                    <p
+                      className={`turn-text ${turn.transcript_redacted_at ? 'text-muted-foreground italic' : ''}`}
+                    >
+                      {turn.transcript_redacted_at
+                        ? 'Transcript text removed under retention policy. Timing evidence is preserved.'
+                        : turn.text}
+                    </p>
                     {turn.node && (
                       <p className="turn-node">{label(turn.node)}</p>
                     )}

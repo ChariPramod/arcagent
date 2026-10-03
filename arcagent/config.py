@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     cartesia_model_id: str = "sonic-2"
 
     # Compliance
-    transcript_retention_days: int = Field(default=30, ge=1)
+    transcript_retention_days: int = Field(default=30, ge=1, le=36_500)
 
     @property
     def stream_url(self) -> str:

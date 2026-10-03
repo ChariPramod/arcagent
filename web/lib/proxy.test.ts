@@ -303,3 +303,47 @@ void test('group routes preserve location scope and derive CRM actor server-side
   );
   assert.equal(denied.status, 404);
 });
+
+void test('work filters are validated and storage remains read-only', async () => {
+  let target = '';
+  const transport: typeof fetch = async (input) => {
+    target = input instanceof Request ? input.url : input.toString();
+    return Response.json({});
+  };
+  const filtered = await proxyConsole(
+    new Request(
+      'https://site.example/api/console/pipeline?due=overdue&owner=unassigned',
+    ),
+    ['pipeline'],
+    'owner',
+    config,
+    transport,
+  );
+  assert.equal(filtered.status, 200);
+  assert.equal(new URL(target).searchParams.get('due'), 'overdue');
+  assert.equal(new URL(target).searchParams.get('owner'), 'unassigned');
+  const invalid = await proxyConsole(
+    new Request('https://site.example/api/console/pipeline?due=anything'),
+    ['pipeline'],
+    'owner',
+    config,
+    never,
+  );
+  assert.equal(invalid.status, 400);
+  const storage = await proxyConsole(
+    new Request('https://site.example/api/console/storage'),
+    ['storage'],
+    'owner',
+    config,
+    transport,
+  );
+  assert.equal(storage.status, 200);
+  const mutation = await proxyConsole(
+    new Request('https://site.example/api/console/storage', { method: 'POST' }),
+    ['storage'],
+    'owner',
+    config,
+    never,
+  );
+  assert.equal(mutation.status, 405);
+});

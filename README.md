@@ -114,7 +114,7 @@ ngrok http 8000                            # point the Twilio voice webhook at
 | Compare two runs | `python -m evals.compare_runs <old> <new>` |
 | Render the results table | `python -m scripts.render_eval_results` |
 | Dashboard | `streamlit run dashboard/app.py` |
-| Purge old transcripts | `python -m scripts.purge_old_data --dry-run` |
+| Preview expired transcript text | `python -m scripts.purge_old_data --dry-run` |
 
 The live vendor checks are skipped by default: `RUN_INTEGRATION=1 pytest
 tests/test_vendor_integration.py` runs them and costs money.
@@ -138,7 +138,9 @@ docs/                  architecture, scoring, conversation design, turn taking,
 
 | Document | What it is for |
 |---|---|
-| [architecture.md](docs/architecture.md) | the call path, the concurrency model, deliberate omissions |
+| [architecture.md](docs/architecture.md) | deployment, runtime, trust boundaries, and evidence |
+| [query_response_architecture.md](docs/query_response_architecture.md) | voice and workspace request flows, CRM delivery, and retention |
+| [Storage and query guide](STORAGE_AND_QUERY_OPTIMIZATION.md) | query evidence, bounded retention, and operator commands |
 | [scoring.md](docs/scoring.md) | the rule table, the threshold, worked examples |
 | [conversation_design.md](docs/conversation_design.md) | node responsibilities and the objection playbook |
 | [turn_taking.md](docs/turn_taking.md) | the barge in state machine, written before the code |

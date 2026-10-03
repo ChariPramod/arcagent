@@ -1,5 +1,12 @@
 # ArcAgent iterative delivery plan
 
+## October 2: evidence-preserving retention and efficient reads
+
+Update architecture diagrams against source, replace bulky list reads with narrow projections, add measured indexes, preserve latency during bounded transcript redaction, and surface work queues and read-only storage health. Verify at existing HTTP, retention-command, proxy, migration, and public filtering interfaces. No live redaction is part of release verification. Keep full evidence detail reads and explicit CRM dispatch semantics intact. Review synthetic query plans without extrapolating production performance.
+
+Next: after activation, collect PostgreSQL latency/query-plan evidence under representative authorized data, review deep-page/detail pagination needs, and choose a retention schedule only after its policy and recovery behavior are approved. See [the optimization guide](STORAGE_AND_QUERY_OPTIMIZATION.md) and [updated handoff](PROJECT_HANDOFF.md).
+
+
 ## October 2: dental group enquiry-to-CRM workflow
 
 Selected buyer: a dental group with multiple locations. Selected integration priority: CRM lead delivery and staff follow-up. Implemented a shared group pipeline, location management, revision-safe staff updates, contact correction, business stages, due actions, contact-only export, durable CRM queue, explicit dispatch, destination validation, uncertain-result recovery, and truthful pilot readiness. The fictional demo exercises the workflow without external effects.

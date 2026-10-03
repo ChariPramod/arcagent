@@ -42,6 +42,7 @@ export async function proxyConsole(
       'integrations',
       'integrations/deliveries',
       'pilot',
+      'storage',
     ].includes(route) ||
     /^(pipeline|locations)\/\d+\/audit$/.test(route);
   const writable =
@@ -128,6 +129,17 @@ export async function proxyConsole(
     if (!['new', 'contacted', 'booked', 'won', 'lost'].includes(stage))
       return json({ detail: 'Invalid stage' }, 400);
     upstream.searchParams.set('stage', stage);
+  }
+  for (const [key, values] of [
+    ['due', ['overdue', 'scheduled', 'unscheduled']],
+    ['owner', ['unassigned']],
+  ] as const) {
+    const value = query.get(key);
+    if (value !== null && route === 'pipeline') {
+      if (!(values as readonly string[]).includes(value))
+        return json({ detail: 'Invalid work filter' }, 400);
+      upstream.searchParams.set(key, value);
+    }
   }
   const unassigned = query.get('unassigned');
   if (unassigned !== null && route === 'pipeline') {

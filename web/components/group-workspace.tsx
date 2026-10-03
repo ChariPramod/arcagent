@@ -13,11 +13,13 @@ import {
   X,
   Plus,
   AlertTriangle,
+  Database,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { StorageHealth } from '@/components/storage-health';
 import { read, write } from '@/lib/client';
 import {
   STAGES,
@@ -26,6 +28,9 @@ import {
   exampleLocations,
   exportLeads,
   isOverdue,
+  matchesWorkFilters,
+  type DueFilter,
+  type OwnerFilter,
   type PipelineLead,
   type PipelinePage,
   type Location,
@@ -34,7 +39,7 @@ import {
   type Pilot,
 } from '@/lib/group';
 
-type Tab = 'pipeline' | 'locations' | 'integrations' | 'pilot';
+type Tab = 'pipeline' | 'locations' | 'integrations' | 'pilot' | 'storage';
 const selectClass = 'h-10 rounded-lg border bg-background px-3 text-sm w-full';
 const demoDestinations: Destination[] = [
   {
@@ -75,6 +80,9 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
   const [total, setTotal] = useState(demo ? exampleLeads.length : 0);
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
+  const [due, setDue] = useState<DueFilter>('all');
+  const [owner, setOwner] = useState<OwnerFilter>('all');
+  const [stageFilter, setStageFilter] = useState('all');
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(!demo);
@@ -84,37 +92,27 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
   const [busy, setBusy] = useState(false);
   const [deliveryPage, setDeliveryPage] = useState(0);
   const [deliveryTotal, setDeliveryTotal] = useState(0);
+  // Reference data is independent of pipeline filters and loaded once per explicit refresh.
   useEffect(() => {
     if (demo) return;
     const controller = new AbortController();
-    // oxlint-disable-next-line react/react-compiler -- Synchronize remote workspace query state.
-    setLoading(true);
-    setErrors({});
-    const scope =
-      filter === 'all'
-        ? ''
-        : filter === 'unassigned'
-          ? '&unassigned=true'
-          : `&location_id=${filter}`;
     const load = <T,>(key: string, path: string, accept: (value: T) => void) =>
       read<T>(path, controller.signal)
         .then((value) => {
-          if (!controller.signal.aborted) accept(value);
+          if (!controller.signal.aborted) {
+            accept(value);
+            setErrors((old) => {
+              const next = { ...old };
+              delete next[key];
+              return next;
+            });
+          }
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted)
             setErrors((old) => ({ ...old, [key]: errorText(error) }));
         });
     void Promise.all([
-      load<PipelinePage>(
-        'pipeline',
-        `pipeline?limit=50&offset=${offset}${scope}`,
-        (value) => {
-          setLeads(value.items);
-          setTotal(value.total);
-          setSummary(value.summary);
-        },
-      ),
       load<{ items: Location[] }>('locations', 'locations', (value) =>
         setLocations(value.items),
       ),
@@ -123,30 +121,86 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
         'integrations',
         (value) => setDestinations(value.destinations),
       ),
-      load<{ items: Delivery[]; total: number }>(
-        'deliveries',
-        `integrations/deliveries?limit=25&offset=${deliveryPage}`,
-        (value) => {
-          setDeliveries(value.items);
-          setDeliveryTotal(value.total);
-        },
-      ),
-      load<Pilot>('pilot', 'pilot', setPilot),
-    ]).finally(() => {
+    ]);
+    return () => controller.abort();
+  }, [demo, refresh]);
+  // Query only the active view; changing filters never reloads delivery history or readiness.
+  useEffect(() => {
+    if (demo) return;
+    const controller = new AbortController();
+    // oxlint-disable-next-line react/react-compiler -- Synchronize the active remote query.
+    setLoading(true);
+    const params = new URLSearchParams({ limit: '50', offset: String(offset) });
+    if (filter === 'unassigned') params.set('unassigned', 'true');
+    else if (filter !== 'all') params.set('location_id', filter);
+    if (due !== 'all') params.set('due', due);
+    if (owner !== 'all') params.set('owner', owner);
+    if (stageFilter !== 'all') params.set('stage', stageFilter);
+    const load = <T,>(key: string, path: string, accept: (value: T) => void) =>
+      read<T>(path, controller.signal)
+        .then((value) => {
+          if (!controller.signal.aborted) {
+            accept(value);
+            setErrors((old) => {
+              const next = { ...old };
+              delete next[key];
+              return next;
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted)
+            setErrors((old) => ({ ...old, [key]: errorText(error) }));
+        });
+    const request =
+      tab === 'pipeline'
+        ? load<PipelinePage>('pipeline', `pipeline?${params}`, (value) => {
+            setLeads(value.items);
+            setTotal(value.total);
+            setSummary(value.summary);
+          })
+        : tab === 'integrations'
+          ? load<{ items: Delivery[]; total: number }>(
+              'deliveries',
+              `integrations/deliveries?limit=25&offset=${deliveryPage}`,
+              (value) => {
+                setDeliveries(value.items);
+                setDeliveryTotal(value.total);
+              },
+            )
+          : tab === 'pilot'
+            ? load<Pilot>('pilot', 'pilot', setPilot)
+            : Promise.resolve();
+    void request.finally(() => {
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [demo, filter, offset, refresh, deliveryPage]);
+  }, [
+    demo,
+    tab,
+    filter,
+    offset,
+    due,
+    owner,
+    stageFilter,
+    refresh,
+    deliveryPage,
+  ]);
   const scoped = demo
     ? leads.filter(
         (lead) =>
-          filter === 'all' ||
-          (filter === 'unassigned'
-            ? lead.location_id === null
-            : lead.location_id === Number(filter)),
+          (filter === 'all' ||
+            (filter === 'unassigned'
+              ? lead.location_id === null
+              : lead.location_id === Number(filter))) &&
+          matchesWorkFilters(lead, due, owner),
       )
     : leads;
-  const visible = scoped.filter((lead) =>
+  const staged =
+    demo && stageFilter !== 'all'
+      ? scoped.filter((lead) => lead.stage === stageFilter)
+      : scoped;
+  const visible = staged.filter((lead) =>
     `${lead.name ?? ''} ${lead.assignee ?? ''} ${lead.call_id}`
       .toLowerCase()
       .includes(query.toLowerCase()),
@@ -345,6 +399,7 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
             ['locations', 'Locations', Building2],
             ['integrations', 'CRM & automations', Plug],
             ['pilot', 'Pilot launch', ShieldCheck],
+            ['storage', 'Data health', Database],
           ] as const
         ).map(([key, title, Icon]) => (
           <Button
@@ -392,6 +447,63 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
                   <option key={location.id} value={location.id}>
                     {location.name}
                     {!location.active ? ' (inactive)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="w-full sm:w-48">
+              <label className="sr-only" htmlFor="due-filter">
+                Follow-up timing
+              </label>
+              <select
+                id="due-filter"
+                className={selectClass}
+                value={due}
+                onChange={(event) => {
+                  setDue(event.target.value as DueFilter);
+                  setOffset(0);
+                }}
+              >
+                <option value="all">Any follow-up time</option>
+                <option value="overdue">Overdue follow-ups</option>
+                <option value="scheduled">Upcoming follow-ups</option>
+                <option value="unscheduled">No next action</option>
+              </select>
+            </div>
+            <div className="w-full sm:w-44">
+              <label className="sr-only" htmlFor="owner-filter">
+                Staff ownership
+              </label>
+              <select
+                id="owner-filter"
+                className={selectClass}
+                value={owner}
+                onChange={(event) => {
+                  setOwner(event.target.value as OwnerFilter);
+                  setOffset(0);
+                }}
+              >
+                <option value="all">Any staff owner</option>
+                <option value="unassigned">No owner assigned</option>
+              </select>
+            </div>
+            <div className="w-full sm:w-48">
+              <label className="sr-only" htmlFor="stage-filter">
+                Business stage filter
+              </label>
+              <select
+                id="stage-filter"
+                className={selectClass}
+                value={stageFilter}
+                onChange={(event) => {
+                  setStageFilter(event.target.value);
+                  setOffset(0);
+                }}
+              >
+                <option value="all">All business stages</option>
+                {STAGES.map((stage) => (
+                  <option key={stage} value={stage}>
+                    {STAGE_NAMES[stage]}
                   </option>
                 ))}
               </select>
@@ -491,9 +603,10 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
           )}
           <div className="flex flex-wrap gap-3 justify-between items-center text-xs text-muted-foreground">
             <p>
-              Showing {visible.length} of {demo ? scoped.length : total}{' '}
+              Showing {visible.length} of {demo ? staged.length : total}{' '}
               matching enquiries. Search and export apply to this page. Stage
-              totals cover the selected location.
+              totals cover location, timing, and ownership filters across all
+              stages. Timing filters exclude converted and closed enquiries.
             </p>
             {!demo && (
               <div className="flex gap-2">
@@ -686,6 +799,7 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
           leads={leads}
         />
       )}
+      {tab === 'storage' && <StorageHealth demo={demo} refresh={refresh} />}
       {selected && (
         <LeadEditor
           key={selected.call_id}

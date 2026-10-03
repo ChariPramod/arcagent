@@ -6,8 +6,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AwareDatetime, Field, field_validator, model_validator
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import load_only
 
 from arcagent.console.api import Database, authenticate, iso
 from arcagent.console.workflows import Actor, Input, RecordId, audit, commit, serialize
@@ -62,11 +63,18 @@ def item(call, lead, state, location_name):
 def rows():
     # Historical schemas do not constrain lead.call_id uniquely. Treat one call
     # as one enquiry and deterministically use its latest saved lead record.
-    latest = select(func.max(Lead.id).label("lead_id")).group_by(Lead.call_id).subquery()
+    latest = (
+        select(Lead.id)
+        .where(Lead.call_id == Call.id)
+        .order_by(Lead.id.desc())
+        .limit(1)
+        .correlate(Call)
+        .scalar_subquery()
+    )
     return (
         select(Call, Lead, LeadPipeline, Location.name)
-        .join(Lead, Lead.call_id == Call.id)
-        .join(latest, latest.c.lead_id == Lead.id)
+        .select_from(Call)
+        .join(Lead, Lead.id == latest)
         .outerjoin(LeadPipeline, LeadPipeline.call_id == Call.id)
         .outerjoin(Location, Location.id == LeadPipeline.location_id)
     )
@@ -80,18 +88,43 @@ def pipeline(
     stage: Stage | None = None,
     location_id: int | None = Query(None, gt=0, le=2_147_483_647),
     unassigned: bool = False,
+    due: Literal["overdue", "scheduled", "unscheduled"] | None = None,
+    owner: Literal["unassigned"] | None = None,
 ):
-    base = rows()
+    conditions = []
     if location_id is not None and unassigned:
         raise HTTPException(422, "Choose a location or unassigned, not both")
     if location_id is not None:
-        base = base.where(LeadPipeline.location_id == location_id)
+        conditions.append(LeadPipeline.location_id == location_id)
     elif unassigned:
-        base = base.where(LeadPipeline.location_id.is_(None))
-    # Aggregate the same enquiry set used for pagination, never infer revenue.
-    grouped = base.with_only_columns(
-        func.coalesce(LeadPipeline.stage, "new").label("stage")
-    ).subquery()
+        conditions.append(LeadPipeline.location_id.is_(None))
+    if owner == "unassigned":
+        conditions.append(
+            or_(LeadPipeline.assignee.is_(None), func.trim(LeadPipeline.assignee) == "")
+        )
+    if due is not None:
+        # Closed enquiries do not remain in staff follow-up queues. Capture one
+        # instant for the request so count and page share the same boundary.
+        now = datetime.now(UTC)
+        conditions.append(
+            func.coalesce(LeadPipeline.stage, "new").in_(("new", "contacted", "booked"))
+        )
+        if due == "overdue":
+            conditions.append(LeadPipeline.next_action_at < now)
+        elif due == "scheduled":
+            conditions.append(LeadPipeline.next_action_at >= now)
+        else:
+            conditions.append(LeadPipeline.next_action_at.is_(None))
+    # Aggregate all stages after work filters, before the optional stage filter.
+    # A page or stage selection never changes the board's other stage counts.
+    base = rows().where(*conditions)
+    grouped = (
+        select(func.coalesce(LeadPipeline.stage, "new").label("stage"))
+        .select_from(Call)
+        .outerjoin(LeadPipeline, LeadPipeline.call_id == Call.id)
+        .where(*conditions, select(Lead.id).where(Lead.call_id == Call.id).exists())
+        .subquery()
+    )
     counts = dict(
         session.execute(select(grouped.c.stage, func.count()).group_by(grouped.c.stage)).all()
     )
@@ -102,7 +135,21 @@ def pipeline(
         "items": [
             item(*row)
             for row in session.execute(
-                filtered.order_by(Call.started_at.desc(), Call.id.desc())
+                filtered.options(
+                    load_only(Call.id, Call.started_at, Call.outcome, raiseload=True),
+                    load_only(Lead.id, Lead.name, Lead.callback_number, raiseload=True),
+                    load_only(
+                        LeadPipeline.location_id,
+                        LeadPipeline.stage,
+                        LeadPipeline.assignee,
+                        LeadPipeline.next_action_at,
+                        LeadPipeline.notes,
+                        LeadPipeline.revision,
+                        LeadPipeline.updated_at,
+                        raiseload=True,
+                    ),
+                )
+                .order_by(Call.started_at.desc(), Call.id.desc())
                 .limit(limit)
                 .offset(offset)
             )
@@ -180,7 +227,7 @@ def pipeline_audit(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0, le=1_000_000),
 ):
-    if session.execute(rows().where(Call.id == call_id)).first() is None:
+    if session.scalar(select(Lead.id).where(Lead.call_id == call_id).limit(1)) is None:
         raise HTTPException(404, "Lead enquiry not found")
     query = select(WorkflowAudit).where(
         WorkflowAudit.call_id == call_id, WorkflowAudit.entity == "pipeline"

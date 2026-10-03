@@ -9,13 +9,13 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from arcagent.config import Settings, get_settings
 from arcagent.persistence.db import session_scope
-from arcagent.persistence.models import Call, EvalResult, EvalRun, Lead, Outcome
+from arcagent.persistence.models import Call, EvalResult, EvalRun, Lead, LeadScore, Outcome
 from arcagent.persistence.repo import EvalRepository
 from arcagent.persistence.transfer_models import TransferAttempt, TransferProgress
 from evals import metrics
@@ -65,9 +65,7 @@ def iso(value: datetime | None) -> str | None:
     return value.replace(tzinfo=UTC).isoformat() if value.tzinfo is None else value.isoformat()
 
 
-def call_summary(call: Call) -> dict[str, Any]:
-    lead = call.lead
-    score = max(lead.scores, key=lambda item: item.id) if lead and lead.scores else None
+def call_summary(call: Call, lead: Lead | None, score: LeadScore | None) -> dict[str, Any]:
     return {
         "id": call.id,
         "name": lead.name if lead else None,
@@ -88,19 +86,48 @@ def calls(
     offset: int = Query(0, ge=0),
     outcome: Outcome | None = None,
 ) -> dict[str, Any]:
-    statement = select(Call)
+    # Correlated latest-row lookups use parent/id indexes and never materialize
+    # historical scores, clinical JSON or transcript text for a summary page.
+    latest_lead = (
+        select(Lead.id)
+        .where(Lead.call_id == Call.id)
+        .order_by(Lead.id.desc())
+        .limit(1)
+        .correlate(Call)
+        .scalar_subquery()
+    )
+    latest_score = (
+        select(LeadScore.id)
+        .where(LeadScore.lead_id == Lead.id)
+        .order_by(LeadScore.id.desc())
+        .limit(1)
+        .correlate(Lead)
+        .scalar_subquery()
+    )
+    statement = (
+        select(
+            Call.id,
+            Lead.name,
+            Call.started_at,
+            Call.duration_s,
+            Call.outcome,
+            Call.language,
+            Lead.treatment_interest,
+            LeadScore.score,
+            LeadScore.threshold_used.label("threshold"),
+        )
+        .outerjoin(Lead, Lead.id == latest_lead)
+        .outerjoin(LeadScore, LeadScore.id == latest_score)
+    )
     count = select(func.count(Call.id))
     if outcome:
         statement = statement.where(Call.outcome == outcome)
         count = count.where(Call.outcome == outcome)
-    records = session.scalars(
-        statement.options(selectinload(Call.lead).selectinload(Lead.scores))
-        .order_by(Call.started_at.desc(), Call.id.desc())
-        .offset(offset)
-        .limit(limit)
-    ).all()
+    records = session.execute(
+        statement.order_by(Call.started_at.desc(), Call.id.desc()).offset(offset).limit(limit)
+    ).mappings()
     return {
-        "items": [call_summary(call) for call in records],
+        "items": [{**row, "started_at": iso(row["started_at"])} for row in records],
         "total": session.scalar(count),
         "limit": limit,
         "offset": offset,
@@ -146,8 +173,19 @@ def call_detail(
     call = session.get(Call, call_id)
     if call is None:
         raise HTTPException(404, "Call not found")
-    lead = call.lead
-    score = max(lead.scores, key=lambda item: item.id) if lead and lead.scores else None
+    lead = session.scalar(
+        select(Lead).where(Lead.call_id == call_id).order_by(Lead.id.desc()).limit(1)
+    )
+    score = (
+        session.scalar(
+            select(LeadScore)
+            .where(LeadScore.lead_id == lead.id)
+            .order_by(LeadScore.id.desc())
+            .limit(1)
+        )
+        if lead
+        else None
+    )
     fields = (
         {
             name: getattr(lead, name)
@@ -170,7 +208,7 @@ def call_detail(
         else {}
     )
     return {
-        **call_summary(call),
+        **call_summary(call, lead, score),
         "fields": fields,
         "transfer": transfer_evidence(session, call_id),
         "score_breakdown": score.score_breakdown if score else {},
@@ -180,6 +218,7 @@ def call_detail(
                 "id": turn.id,
                 "speaker": str(turn.speaker),
                 "text": turn.text,
+                "transcript_redacted_at": iso(turn.transcript_redacted_at),
                 "started_at": iso(turn.started_at),
                 "node": turn.node_name,
                 "interrupted": turn.interrupted,
@@ -236,15 +275,79 @@ def run_summary(run: EvalRun) -> dict[str, Any]:
 def runs(
     session: Database, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)
 ) -> dict[str, Any]:
-    records = session.scalars(
-        select(EvalRun)
-        .options(selectinload(EvalRun.results))
-        .order_by(EvalRun.id.desc())
-        .offset(offset)
-        .limit(limit)
-    ).all()
+    records = (
+        session.execute(
+            select(
+                EvalRun.id,
+                EvalRun.run_name.label("name"),
+                EvalRun.created_at,
+                EvalRun.prompt_version,
+                EvalRun.threshold,
+                EvalRun.tier,
+                EvalRun.git_sha,
+                EvalRun.snapshot["suite"].as_string().label("suite"),
+            )
+            .order_by(EvalRun.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        .mappings()
+        .all()
+    )
+    run_ids = [row["id"] for row in records]
+    groups = {}
+    if run_ids:
+        # Collapse repeated scenarios in SQL. Summary reads never fetch expected,
+        # actual, transcript, notes or the full immutable persona snapshot.
+        known_hot = and_(
+            EvalResult.handoff_expected.is_(True), EvalResult.handoff_actual.is_not(None)
+        )
+        correct_hot = and_(
+            EvalResult.handoff_expected.is_(True), EvalResult.handoff_actual.is_(True)
+        )
+        for row in session.execute(
+            select(
+                EvalResult.run_id,
+                EvalResult.scenario_id,
+                func.count().label("results"),
+                func.sum(case((EvalResult.passed.is_(True), 1), else_=0)).label("passes"),
+                func.sum(EvalResult.field_accuracy).label("accuracy_sum"),
+                func.count(EvalResult.field_accuracy).label("accuracy_count"),
+                func.sum(case((known_hot, 1), else_=0)).label("hot_count"),
+                func.sum(case((correct_hot, 1), else_=0)).label("hot_correct"),
+            )
+            .where(EvalResult.run_id.in_(run_ids))
+            .group_by(EvalResult.run_id, EvalResult.scenario_id)
+        ):
+            groups.setdefault(row.run_id, []).append(row)
+    items = []
+    for record in records:
+        scenarios = groups.get(record["id"], [])
+        count = sum(row.results for row in scenarios)
+        accuracy_count = sum(row.accuracy_count for row in scenarios)
+        hot_count = sum(row.hot_count for row in scenarios)
+        items.append(
+            {
+                **record,
+                "created_at": iso(record["created_at"]),
+                "tier": str(record["tier"]),
+                "suite": record["suite"] or "unrecorded",
+                "results": count,
+                "scenarios": len(scenarios),
+                "pass_rate": sum(row.passes for row in scenarios) / count if count else None,
+                "field_accuracy": sum(row.accuracy_sum or 0 for row in scenarios) / accuracy_count
+                if accuracy_count
+                else None,
+                "handoff_recall": sum(row.hot_correct for row in scenarios) / hot_count
+                if hot_count
+                else None,
+                "flaky": sorted(
+                    row.scenario_id for row in scenarios if 0 < row.passes < row.results
+                ),
+            }
+        )
     return {
-        "items": [run_summary(run) for run in records],
+        "items": items,
         "total": session.scalar(select(func.count(EvalRun.id))),
         "limit": limit,
         "offset": offset,

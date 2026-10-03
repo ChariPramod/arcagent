@@ -221,3 +221,134 @@ def test_transfer_evidence_excludes_vendor_ids_and_requires_bridge(console):
     assert response.json()["transfer"]["connection_confirmed"] is True
     assert response.json()["transfer"]["human_identity_verified"] is False
     assert response.json()["transfer"]["resolved_at"] is not None
+
+
+def test_call_lists_use_latest_lead_and_score_without_loading_history(console):
+    from sqlalchemy import event
+
+    client, url, _ = console
+    with session_scope(url) as session:
+        call = Call(twilio_call_sid="duplicate-leads", from_number_hash="redacted")
+        session.add(call)
+        session.flush()
+        call_id = call.id
+        session.add(Lead(call_id=call_id, name="Obsolete"))
+        latest = Lead(call_id=call_id, name="Latest", objections=["private clinical detail"])
+        session.add(latest)
+        session.flush()
+        for value in range(40):
+            session.add(
+                LeadScore(
+                    lead_id=latest.id,
+                    score=value,
+                    threshold_used=5,
+                    decision=Decision.HANDOFF,
+                    score_breakdown={"private": value},
+                )
+            )
+    queries = []
+    engine = get_engine(url)
+
+    def capture(_conn, _cursor, statement, _params, _context, _many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            queries.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        response = client.get("/api/console/calls")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1 and len(data["items"]) == 1
+    assert data["items"][0]["name"] == "Latest"
+    assert data["items"][0]["score"] == 39
+    assert len(queries) == 2
+    assert not any("score_breakdown" in query or "objections" in query for query in queries)
+    detail = client.get(f"/api/console/calls/{call_id}").json()
+    assert detail["name"] == "Latest" and detail["score"] == 39
+
+
+def test_eval_list_metrics_match_detail_without_transcript_payloads(console):
+    from sqlalchemy import event
+
+    client, url, _ = console
+    with session_scope(url) as session:
+        repo = EvalRepository(session)
+        run = repo.create_run(
+            "aggregate",
+            "sha",
+            "v1",
+            5,
+            Tier.TEXT,
+            snapshot={"suite": "fixture", "personas": {"large": "not needed"}},
+        )
+        run_id = run.id
+        for scenario, passed, accuracy, expected, actual in [
+            ("a", True, 1.0, True, True),
+            ("a", False, None, True, False),
+            ("b", True, 0.5, False, True),
+            ("c", True, None, True, None),
+        ]:
+            repo.add_result(
+                run_id,
+                scenario_id=scenario,
+                passed=passed,
+                field_accuracy=accuracy,
+                handoff_expected=expected,
+                handoff_actual=actual,
+                transcript=[{"speaker": "agent", "text": "private content"}],
+                expected={},
+                actual={},
+            )
+    detail = client.get(f"/api/console/evals/{run_id}").json()
+    queries = []
+    engine = get_engine(url)
+
+    def capture(_conn, _cursor, statement, _params, _context, _many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            queries.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        listing = client.get("/api/console/evals").json()["items"][0]
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert listing == {key: detail[key] for key in listing}
+    assert listing["results"] == 4 and listing["flaky"] == ["a"]
+    assert listing["handoff_recall"] == 0.5
+    assert len(queries) <= 3
+    assert not any(
+        "eval_results.transcript" in query
+        or "eval_results.actual" in query
+        or "eval_results.expected" in query
+        for query in queries
+    )
+
+
+def test_query_index_migration_upgrade_downgrade(tmp_path):
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    from alembic import command
+
+    url = f"sqlite:///{tmp_path / 'indexes.db'}"
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", url)
+    command.upgrade(config, "g05cf124de67")
+    engine = create_engine(url)
+    inspector = inspect(engine)
+    assert {"ix_calls_started_id", "ix_calls_outcome_started_id"} <= {
+        item["name"] for item in inspector.get_indexes("calls")
+    }
+    assert {item["name"] for item in inspector.get_indexes("leads")} == {"ix_leads_call_id_id"}
+    assert "ix_turns_pending_transcript_id" in {
+        item["name"] for item in inspector.get_indexes("turns")
+    }
+    assert "transcript_redacted_at" in {item["name"] for item in inspector.get_columns("turns")}
+    command.downgrade(config, "f94be013cd56")
+    inspector = inspect(engine)
+    assert {item["name"] for item in inspector.get_indexes("leads")} == {"ix_leads_call_id"}
+    assert "transcript_redacted_at" not in {item["name"] for item in inspector.get_columns("turns")}
+    command.upgrade(config, "g05cf124de67")
+    engine.dispose()

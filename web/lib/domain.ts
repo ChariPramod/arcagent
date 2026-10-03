@@ -10,6 +10,7 @@ export type CallSummary = {
   threshold: number | null;
 };
 export type Turn = {
+  transcript_redacted_at?: string | null;
   id: number;
   speaker: string;
   text: string;

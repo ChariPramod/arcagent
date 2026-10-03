@@ -344,3 +344,55 @@ def test_contact_edits_rollback_when_audit_commit_fails(console, monkeypatch):
     with session_scope(url) as session:
         assert session.scalar(select(Lead).where(Lead.call_id == 1)).name == "Synthetic lead 0"
         assert session.scalars(select(LeadPipeline)).all() == []
+
+
+def test_due_and_owner_filters_scope_summary_before_stage_and_pagination(console):
+    client, _, _ = console
+    for call_id, changes in [
+        (1, {"stage": "contacted", "next_action_at": "2000-01-01T00:00:00Z"}),
+        (2, {"stage": "booked", "next_action_at": "2099-01-01T00:00:00Z", "assignee": "Alex"}),
+    ]:
+        assert (
+            client.patch(
+                f"/api/console/pipeline/{call_id}", json={"revision": 0, **changes}
+            ).status_code
+            == 200
+        )
+    overdue = client.get("/api/console/pipeline?due=overdue&owner=unassigned").json()
+    assert [row["call_id"] for row in overdue["items"]] == [1]
+    assert overdue["summary"] == {
+        "new": 0,
+        "contacted": 1,
+        "booked": 0,
+        "won": 0,
+        "lost": 0,
+        "total": 1,
+    }
+    filtered = client.get("/api/console/pipeline?due=overdue&stage=new&offset=1").json()
+    assert filtered["items"] == [] and filtered["total"] == 0
+    assert filtered["summary"]["contacted"] == 1
+    assert [
+        row["call_id"] for row in client.get("/api/console/pipeline?due=scheduled").json()["items"]
+    ] == [2]
+    assert [
+        row["call_id"]
+        for row in client.get("/api/console/pipeline?due=unscheduled").json()["items"]
+    ] == [3]
+    assert client.get("/api/console/pipeline?due=scheduled&owner=unassigned").json()["total"] == 0
+    assert (
+        client.patch("/api/console/pipeline/1", json={"revision": 1, "stage": "won"}).status_code
+        == 200
+    )
+    assert client.get("/api/console/pipeline?due=overdue").json()["total"] == 0
+    for query in ("due=today", "owner=someone", "due="):
+        assert client.get(f"/api/console/pipeline?{query}").status_code == 422
+
+
+def test_unassigned_owner_includes_legacy_blank_values_and_no_workflow(console):
+    client, url, _ = console
+    with session_scope(url) as session:
+        session.add(LeadPipeline(call_id=1, assignee="  ", updated_by="legacy"))
+        session.add(LeadPipeline(call_id=2, assignee="Staff", updated_by="legacy"))
+    data = client.get("/api/console/pipeline?owner=unassigned&limit=1").json()
+    assert data["total"] == 2 and data["summary"]["total"] == 2
+    assert len(data["items"]) == 1

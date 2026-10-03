@@ -35,3 +35,59 @@ void test('follow-up due state excludes closed outcomes and missing or invalid d
   ])
     assert.equal(isOverdue({ ...lead, ...patch }, now), false);
 });
+
+void test('work filters identify overdue, scheduled, unowned and unscheduled open enquiries', async () => {
+  const { matchesWorkFilters } = await import('./group.ts');
+  const now = Date.parse('2026-10-02T12:00:00Z');
+  const due = { ...lead, next_action_at: '2026-10-01T12:00:00Z' };
+  assert.equal(matchesWorkFilters(due, 'overdue', 'unassigned', now), true);
+  assert.equal(
+    matchesWorkFilters({ ...due, stage: 'won' }, 'overdue', 'all', now),
+    false,
+  );
+  assert.equal(
+    matchesWorkFilters(
+      { ...due, assignee: ' Jamie ' },
+      'overdue',
+      'unassigned',
+      now,
+    ),
+    false,
+  );
+  assert.equal(
+    matchesWorkFilters(
+      { ...due, next_action_at: '2026-10-02T12:00:00Z' },
+      'scheduled',
+      'all',
+      now,
+    ),
+    true,
+  );
+  assert.equal(
+    matchesWorkFilters(
+      { ...due, next_action_at: null },
+      'unscheduled',
+      'all',
+      now,
+    ),
+    true,
+  );
+  assert.equal(
+    matchesWorkFilters(
+      { ...due, next_action_at: null, stage: 'lost' },
+      'unscheduled',
+      'all',
+      now,
+    ),
+    false,
+  );
+  assert.equal(
+    matchesWorkFilters(
+      { ...due, next_action_at: 'invalid' },
+      'scheduled',
+      'all',
+      now,
+    ),
+    false,
+  );
+});

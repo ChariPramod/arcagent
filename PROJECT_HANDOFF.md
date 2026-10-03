@@ -1,5 +1,20 @@
 # ArcAgent build status and owner handoff
 
+## October 2: architecture, queries, and retention follow-up
+
+Updated the [overall architecture](docs/architecture.md) and [query/response architecture](docs/query_response_architecture.md) with rendered Mermaid diagrams for deployment, voice turns, website reads/writes, and explicit CRM dispatch. The diagrams identify the implemented paths and outstanding provider/sign-in activation; source links connect the design to implementation.
+
+The group pipeline now filters overdue, upcoming, unscheduled, and unowned work, with an additional business-stage filter. These are server-side filters across the matching enquiry set; text search and CSV export still apply to the displayed page. Due queues exclude converted and closed enquiries. Stage totals respect location, timing, and ownership, while spanning all stages. Changing a pipeline filter fetches its pipeline page without reloading unrelated delivery and pilot data.
+
+The read-only **Data health** tab previews eligible transcript text without returning that text or exposing a cleanup button. Retention is dry-run by default and requires explicit `--apply` to clear eligible text. It preserves turn rows, timing, leads, workflow history, and CRM delivery/idempotency evidence. No staging or production text was redacted in this iteration. The detail view marks deliberate removal distinctly from missing text.
+
+Call lists now select only the latest contact/score summaries, evaluation lists aggregate scalar results without transcript/configuration payloads, and indexes support ordering and latest-row lookup. Synthetic query evidence and limitations are in [STORAGE_AND_QUERY_OPTIMIZATION.md](STORAGE_AND_QUERY_OPTIMIZATION.md). These changes reduce work; production latency, storage savings, and capacity have not been benchmarked. Selected-record details still return their full evidence, without transcript-level cursor pagination.
+
+Verification: **821 backend tests passed, 1 skipped; 45 frontend tests passed**. Ruff, TypeScript, frontend lint, native Next.js and Vinext builds passed. A browser walkthrough verified combined overdue/owner filters and the read-only Data health view. All architecture diagrams rendered successfully.
+
+**Owner actions:** review the retention policy and preview before any apply or scheduling; complete the deferred Google and CRM activation; verify the first external test delivery and real-call acceptance cases. Retention does not erase backups, provider copies, evaluation transcripts, extracted fields, or contact snapshots. No new dependencies or cloud services are required.
+
+
 ## October 2: multi-location dental group pilot
 
 The new default demo and authenticated workspace open on **Group workspace**. Staff can manage clinic locations and time zones, assign enquiries, correct contact details, record owners and next actions, track business stages, and export the displayed page as spreadsheet-safe CSV. Pipeline stages are staff-entered business outcomes, separate from telephone outcomes. Concurrent edits use revisions and persist audit records.
@@ -183,7 +198,7 @@ Use consenting volunteers and invented details first. Record what happened, incl
 
 You do not need cloud resources for offline development, fixture tests, or a local database. Deploy a separate staging voice backend when you need a stable public webhook, remote collaborators, repeated real calls, or realistic operational validation. Continue iterating locally and promote reviewed changes to staging; do not wait for every feature to be finished, and do not use production patient data as the development environment.
 
-Deploy the FastAPI voice service, a Postgres database, migrations, secrets, and the necessary scheduled operational jobs. The website is a separate deployment. The existing retention command is `.venv/bin/python -m scripts.purge_old_data --dry-run`; inspect its proposed deletions before scheduling a real purge, and verify the policy against your retention requirements. Audio/object storage is optional until an approved recording/import workflow requires it. The LLM/STT/TTS APIs are external services; you do not deploy those vendor models yourself in the current architecture.
+Deploy the FastAPI voice service, a Postgres database, migrations, secrets, and the necessary scheduled operational jobs. The website is a separate deployment. The existing retention command is `.venv/bin/python -m scripts.purge_old_data --dry-run`; inspect its proposed text redactions before explicitly applying or scheduling cleanup, and verify the policy against your retention requirements. Audio/object storage is optional until an approved recording/import workflow requires it. The LLM/STT/TTS APIs are external services; you do not deploy those vendor models yourself in the current architecture.
 
 To connect website records, set backend `CONSOLE_API_TOKEN`; set server-only website `ARCAGENT_API_URL`, matching `ARCAGENT_API_TOKEN`, and `ARCAGENT_ALLOWED_USER_IDS`. `ADMIN_API_TOKEN` is separate and does not belong in browser code. The current hosted identity design depends on Sites; moving hosts requires an appropriate identity integration. A private website does not imply that the voice backend is deployed or that data processing is approved.
 

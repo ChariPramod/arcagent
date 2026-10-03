@@ -75,6 +75,24 @@ export type Pilot = {
   } | null;
   database: { available: boolean };
 };
+export type DueFilter = 'all' | 'overdue' | 'scheduled' | 'unscheduled';
+export type OwnerFilter = 'all' | 'unassigned';
+export function matchesWorkFilters(
+  lead: PipelineLead,
+  due: DueFilter,
+  owner: OwnerFilter,
+  now = Date.now(),
+): boolean {
+  if (owner === 'unassigned' && lead.assignee?.trim()) return false;
+  if (due === 'all') return true;
+  if (lead.stage === 'won' || lead.stage === 'lost') return false;
+  if (due === 'unscheduled') return lead.next_action_at === null;
+  const time = lead.next_action_at ? Date.parse(lead.next_action_at) : NaN;
+  return (
+    Number.isFinite(time) && (due === 'overdue' ? time < now : time >= now)
+  );
+}
+
 export function isOverdue(lead: PipelineLead, now = Date.now()): boolean {
   return (
     !['won', 'lost'].includes(lead.stage) &&
@@ -166,7 +184,7 @@ export const exampleLeads: PipelineLead[] = [
     call_outcome: 'callback',
     stage: 'contacted',
     assignee: 'Jamie',
-    next_action_at: null,
+    next_action_at: '2026-09-01T16:00:00Z',
     notes: 'Prefers an afternoon conversation.',
     revision: 1,
     updated_at: null,
@@ -182,7 +200,7 @@ export const exampleLeads: PipelineLead[] = [
     call_outcome: 'callback',
     stage: 'booked',
     assignee: 'Taylor',
-    next_action_at: null,
+    next_action_at: '2027-12-01T16:00:00Z',
     notes: 'Consultation arranged by the coordinator.',
     revision: 2,
     updated_at: null,
