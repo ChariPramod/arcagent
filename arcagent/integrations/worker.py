@@ -109,8 +109,12 @@ def finish(factory, attempt: Attempt, status: str, error: str | None, now: datet
         return True
 
 
-def recover_stale(factory, now: datetime, limit: int = 100) -> int:
+def recover_stale(
+    factory, now: datetime, limit: int = 100, *, identity: str = "integration-worker"
+) -> int:
     """Expired claims become uncertain, regardless of whether the process reached the vendor."""
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("Recovery limit must be between 1 and 100")
     count = 0
     with factory() as session:
         rows = session.scalars(
@@ -131,11 +135,16 @@ def recover_stale(factory, now: datetime, limit: int = 100) -> int:
                     IntegrationDelivery.attempt_count == row.attempt_count,
                     IntegrationDelivery.last_attempt_at == row.last_attempt_at,
                 )
-                .values(status="uncertain", error_code="worker_interrupted", updated_at=now)
+                .values(
+                    status="uncertain",
+                    error_code="worker_interrupted",
+                    updated_at=now,
+                    updated_by=identity,
+                )
             )
             if result.rowcount == 1:
                 session.refresh(row)
-                audit_delivery(session, row, "integration-worker", "uncertain")
+                audit_delivery(session, row, identity, "uncertain")
                 count += 1
         session.commit()
     return count

@@ -396,3 +396,187 @@ def test_unassigned_owner_includes_legacy_blank_values_and_no_workflow(console):
     data = client.get("/api/console/pipeline?owner=unassigned&limit=1").json()
     assert data["total"] == 2 and data["summary"]["total"] == 2
     assert len(data["items"]) == 1
+
+
+def test_search_latest_contacts_literal_text_phone_and_exact_call(console):
+    client, url, _ = console
+    with session_scope(url) as session:
+        session.get(Lead, 1).name = "Obsolete hidden contact"
+        session.get(Lead, 2).name = "Alpha wildcard sibling"
+        session.add(Lead(call_id=1, name="Alpha %_ contact", callback_number="+14155550123"))
+        session.add(Lead(call_id=3, name=r"Folder\Desk contact", callback_number="+12025550199"))
+    for query, expected in [
+        (" aLPha %_ ", [1]),
+        ("%_", [1]),
+        ("5550123", [1]),
+        (r"er\D", [3]),
+        ("Obsolete hidden", []),
+        ("01", [1, 3]),
+        ("0002", [2]),
+    ]:
+        data = client.post("/api/console/pipeline/search", json={"query": query}).json()
+        assert sorted(row["call_id"] for row in data["items"]) == expected
+        assert "query" not in data
+        assert data["total"] == len(expected)
+    assert (
+        client.post("/api/console/pipeline/search", json={"query": "99999999999999999999"}).json()[
+            "total"
+        ]
+        == 0
+    )
+
+
+def test_search_scopes_filters_summaries_and_pages_together(console):
+    client, _, _ = console
+    location = client.post(
+        "/api/console/locations", json={"name": "Search clinic", "timezone": "UTC"}
+    ).json()["id"]
+    for call_id, fields in [
+        (1, {"stage": "contacted", "next_action_at": "2000-01-01T00:00:00Z"}),
+        (2, {"stage": "won", "assignee": "Alex"}),
+    ]:
+        assert (
+            client.patch(
+                f"/api/console/pipeline/{call_id}",
+                json={"revision": 0, "location_id": location, **fields},
+            ).status_code
+            == 200
+        )
+    path = f"/api/console/pipeline/search?location_id={location}&stage=contacted&limit=1&offset=1"
+    result = client.post(path, json={"query": "Synthetic"})
+    assert result.status_code == 200 and result.headers["cache-control"] == "no-store"
+    data = result.json()
+    assert data["items"] == [] and data["total"] == 1
+    assert data["summary"]["total"] == 2 and data["summary"]["won"] == 1
+    overdue = client.post(
+        path.split("&stage=")[0] + "&due=overdue&owner=unassigned", json={"query": "Synthetic"}
+    ).json()
+    assert overdue["summary"]["total"] == 1 and overdue["items"][0]["call_id"] == 1
+    assert (
+        client.post(
+            "/api/console/pipeline/search?unassigned=true&due=unscheduled",
+            json={"query": "Synthetic"},
+        ).json()["total"]
+        == 1
+    )
+    assert (
+        client.post(
+            f"/api/console/pipeline/search?unassigned=true&location_id={location}",
+            json={"query": "Synthetic"},
+        ).status_code
+        == 422
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"query": "a"},
+        {"query": "  "},
+        {"query": "x" * 81},
+        {"query": None},
+        {"query": 12},
+        {"query": "Private\x00marker"},
+        {"query": "Private\nmarker"},
+        {"query": "Private marker", "extra": True},
+        ["Private marker"],
+    ],
+)
+def test_search_invalid_input_is_sanitized_before_database(console, body):
+    client, _, app = console
+
+    def forbidden():
+        pytest.fail("Invalid search opened a database session")
+
+    app.dependency_overrides[database] = forbidden
+    result = client.post("/api/console/pipeline/search", json=body)
+    assert result.status_code == 422
+    assert "Private" not in result.text
+    assert result.json() == {
+        "detail": "Provide printable text of 2 to 80 characters, or a positive call ID"
+    }
+
+
+def test_search_auth_precedes_database_and_malformed_body_is_sanitized(console):
+    client, _, app = console
+
+    def forbidden():
+        pytest.fail("Unauthorized search opened a database session")
+
+    app.dependency_overrides[database] = forbidden
+    assert (
+        client.post(
+            "/api/console/pipeline/search",
+            headers={"Authorization": "Bearer wrong"},
+            json={"query": "Private marker"},
+        ).status_code
+        == 401
+    )
+    for body in (b'{"query": "Private marker"', b"x" * 5000):
+        response = client.post(
+            "/api/console/pipeline/search",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 422 and "Private" not in response.text
+
+
+def test_search_database_failure_does_not_disclose_contact_query(console, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.orm import Session
+
+    from arcagent.console import api
+
+    client, url, app = console
+    app.dependency_overrides.pop(database)
+    monkeypatch.setattr(api, "session_scope", lambda: session_scope(url))
+
+    def unavailable(self, *args, **kwargs):
+        raise OperationalError(
+            "private database statement", {"query": "Private marker"}, Exception("query timed out")
+        )
+
+    monkeypatch.setattr(Session, "execute", unavailable)
+    response = client.post("/api/console/pipeline/search", json={"query": "Private marker"})
+    assert response.status_code == 503
+    assert response.json() == {"detail": "The workspace database is unavailable"}
+    assert "Private" not in response.text and "statement" not in response.text
+
+
+def test_search_is_read_only_without_actor_and_avoids_contact_history_payloads(console):
+    from sqlalchemy import event
+
+    client, url, _ = console
+    client.headers.pop("X-Arcagent-Actor")
+    statements = []
+
+    def capture(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+
+    engine = get_engine(url)
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        response = client.post("/api/console/pipeline/search?limit=1", json={"query": "Synthetic"})
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert response.status_code == 200
+    assert response.json()["total"] == 3 and len(response.json()["items"]) == 1
+    assert len(statements) == 2
+    assert all(statement.startswith("SELECT") for statement in statements)
+    assert not any("objections" in statement or "turns" in statement for statement in statements)
+
+
+def test_single_digit_search_matches_only_exact_call_id(console):
+    client, url, _ = console
+    with session_scope(url) as session:
+        session.get(Lead, 2).name = "Synthetic 1 contact"
+        session.get(Lead, 3).callback_number = "+12025550111"
+    for query, call_id in [("1", 1), (" 2 ", 2), ("9", None)]:
+        response = client.post("/api/console/pipeline/search", json={"query": query})
+        assert response.status_code == 200
+        assert [row["call_id"] for row in response.json()["items"]] == (
+            [call_id] if call_id else []
+        )
+    for query in ("0", "a", "\u0661"):
+        assert client.post("/api/console/pipeline/search", json={"query": query}).status_code == 422

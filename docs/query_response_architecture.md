@@ -61,12 +61,21 @@ sequenceDiagram
     I-->>W: Callback authorization code
     W->>I: Exchange code and verify provider identity
     W-->>B: Encrypted secure HttpOnly session cookie
-    B->>W: Workspace read or JSON mutation
-    W->>W: Verify session, allowlist, route and write origin
-    W->>A: Server bearer credential and trusted write actor
+    B->>W: Workspace read or JSON action
+    W->>W: Verify session, allowlist, route and JSON action origin
+    W->>A: Server credential and actor when required
     A->>A: Authenticate and validate request
-    A->>P: Projected read or revision-checked transaction
+    alt Contact search carried in JSON body
+        A->>P: Literal latest-contact match and filtered page
+    else Staff activity cursor read
+        A->>P: Call-scoped audit IDs before cursor, bounded page
+    else Staff mutation
+        A->>P: Revision-checked transaction and audit
+    else Other workspace read
+        A->>P: Projected records and bounded page
+    end
     P-->>A: Rows or committed mutation result
+    A->>A: Apply the route's response field allowlist
     A-->>W: JSON response
     W-->>B: No-store JSON or explicit failure
 ```
@@ -82,6 +91,10 @@ List endpoints return the fields needed by the list. Call summaries project the 
 The [pipeline endpoint](../arcagent/console/pipeline.py) accepts location, stage, owner, due-date, and pagination filters. `unassigned=true` means no location; `owner=unassigned` means no assigned staff member. Due queues cover active workflow stages: `overdue` means the next action precedes a captured UTC reference time, `scheduled` means it is at or after that time, and `unscheduled` means no next-action date. Missing workflow state is treated as unassigned and unscheduled. Won and lost records do not enter due-action queues.
 
 Location, due, and owner filters define the summary population. The optional stage filter further restricts rows and their total; pagination does not shrink the summary. This lets a coordinator see workload totals while paging through a subset. These projections and indexes improve query shape; they do not establish a production throughput or latency claim. The workspace loads storage health when that view is opened. Pipeline filter changes refresh pipeline rows rather than reloading unrelated delivery and pilot panels; location and destination reference data load on mount and explicit refresh.
+
+`POST /api/console/pipeline/search` is a read-only query whose term is carried in a bounded JSON body, not a URL. It uses literal case-insensitive substring matching on the latest saved name and callback number; ASCII numeric input can also identify an exact call. Wildcard characters are escaped. Search combines with the existing filters and defines the summary population before the stage restriction. Validation errors are sanitized so they do not echo the term. Search does not require a write actor at the backend and does not contact an external service. Request and database budgets limit the work attempted; they do not make a broad substring search an indexed full-text search.
+
+The [activity endpoint](../arcagent/console/activity.py) reads recognized workflow audit events for an existing call. It orders by descending audit ID and uses an exclusive `before` cursor, fetching an extra row only to detect whether another page exists. It does not count the entire history. New inserts appear after refresh without shifting older cursor pages. The response includes safe operational values and recognized `fields_changed` names, while omitting private contact values, notes, review evidence and arbitrary metadata. This timeline covers staff workflow events, not every data read or vendor action. It retains the shared group authorization boundary.
 
 ## Contact export query and response
 
@@ -110,6 +123,18 @@ sequenceDiagram
         A->>P: Uncertain or stale sending pending recovery
     end
     O->>A: Refresh delivery status and reconcile evidence
+    opt Expired sending claim
+        O->>A: Explicit stale-recovery request
+        A->>P: Fence expired claim and mark uncertain
+        A-->>O: Recovery count, no external requests
+    end
+    opt Failed or uncertain delivery
+        O->>V: Independently inspect destination records
+        O->>A: Human resolution, evidence and expected review revision
+        A->>P: Check state and atomically append review plus audit
+        P-->>A: Saved review with unchanged provider outcome
+        A-->>O: Human review alongside provider status
+    end
 ```
 
 Queueing creates intent, not an external contact. The immutable snapshot contains contact name/phone and clinic location metadata, excluding medical fields and transcripts. Duplicate request identifiers and duplicate call/destination intent are guarded. Contact correction after queueing does not rewrite a queued payload. Dispatch rejects changed destination configuration and inactive or reassigned locations rather than silently exporting under a different route.
@@ -119,6 +144,10 @@ HubSpot receives standard contact properties; location metadata stays in the del
 The [dispatcher](../arcagent/integrations/worker.py) commits a claim before network I/O and conditions completion on the same active attempt. A recovered stale worker cannot later overwrite the reconciled state. Public-address validation, pinned destination addressing, TLS hostname checks, bounded DNS/HTTP operations, disabled redirects, and server-configured provider domains constrain outbound requests. These controls do not provide distributed exactly-once delivery.
 
 Known safe retry classifications remain queued with a delayed next attempt and an attempt bound. They still need another explicit operator dispatch or an explicitly invoked sending worker. Unknown network responses and expired sending claims become `uncertain`; no automatic replay is permitted. An operator must inspect the destination before taking any further external action. There is no general terminal-delivery requeue endpoint. The worker defaults to dry-run, and no scheduler is implied by its existence. A `delivered` automation record means the webhook acknowledged the request, not that every downstream action succeeded.
+
+`POST /api/console/integrations/deliveries/recover-stale` is an explicit bounded recovery action that makes no external requests. It only converts expired `sending` claims to `uncertain`, attributes the operator and fences late worker completion. Current sending claims stay untouched. Recovery is group-wide rather than restricted to the currently displayed location.
+
+Human reconciliation uses `POST /api/console/integrations/deliveries/{id}/reviews`. Its transaction checks the expected failed or uncertain provider state, attempt count and independent review revision, then appends a review and audit event. A UUID binds retries to the same actor and normalized payload. Conflicting or stale requests require refresh. The provider status, immutable contact snapshot and attempt history are preserved even when an operator reports verified receipt. Evidence is operator-reported; the application does not fetch references or independently verify receipt. Reviews never reset, resend or requeue a delivery. [Review implementation](../arcagent/integrations/reviews.py) and [operator review guide](../INTEGRATION_REVIEW.md) document these boundaries.
 
 ## Storage inspection and retention
 

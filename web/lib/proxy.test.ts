@@ -347,3 +347,79 @@ void test('work filters are validated and storage remains read-only', async () =
   );
   assert.equal(mutation.status, 405);
 });
+
+void test('search is a same-origin read POST and activity/review routes are narrowly allowed', async () => {
+  let target = '';
+  let options: RequestInit | undefined;
+  const transport: typeof fetch = async (input, init) => {
+    target = input instanceof Request ? input.url : input.toString();
+    options = init;
+    return Response.json({ items: [] });
+  };
+  const makeRequest = () =>
+    new Request(
+      'https://site.example/api/console/pipeline/search?due=overdue&query=discard',
+      {
+        method: 'POST',
+        headers: {
+          origin: 'https://site.example',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ query: 'Synthetic Contact' }),
+      },
+    );
+  const request = makeRequest();
+  const retry = makeRequest();
+  const result = await proxyConsole(
+    request,
+    ['pipeline', 'search'],
+    'owner',
+    config,
+    transport,
+  );
+  assert.equal(result.status, 200);
+  assert.equal(new URL(target).searchParams.get('due'), 'overdue');
+  assert.equal(new URL(target).searchParams.has('query'), false);
+  assert.equal(new Headers(options?.headers).has('X-Arcagent-Actor'), false);
+  const outage = await proxyConsole(
+    retry,
+    ['pipeline', 'search'],
+    'owner',
+    config,
+    async () => new Response('', { status: 503 }),
+  );
+  assert.equal(outage.status, 503);
+  assert.doesNotMatch(await outage.text(), /may have been saved/);
+  const activity = await proxyConsole(
+    new Request('https://site.example/api/console/calls/1/activity?before=12'),
+    ['calls', '1', 'activity'],
+    'owner',
+    config,
+    transport,
+  );
+  assert.equal(activity.status, 200);
+  for (const route of [
+    'integrations/deliveries/1/reviews',
+    'integrations/deliveries/recover-stale',
+  ]) {
+    const result = await proxyConsole(
+      new Request(`https://site.example/api/console/${route}`, {
+        method: 'POST',
+        headers: {
+          origin: 'https://site.example',
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      }),
+      route.split('/'),
+      'owner',
+      config,
+      transport,
+    );
+    assert.equal(result.status, 200);
+    assert.equal(
+      new Headers(options?.headers).get('X-Arcagent-Actor'),
+      'owner',
+    );
+  }
+});

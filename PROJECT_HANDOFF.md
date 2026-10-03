@@ -1,10 +1,25 @@
 # ArcAgent build status and owner handoff
 
+## October 2: enquiry search, staff history, and CRM investigation
+
+Staff can now search every stored enquiry by captured name, literal phone text, or exact call ID. Search combines with location, timing, ownership, and stage filters; terms travel in a protected POST body instead of the URL. Results and CSV export remain paginated. PostgreSQL statement and lock budgets bound broad reads; production search performance remains unmeasured.
+
+Every enquiry has an on-demand **Staff activity** timeline with stable cursor pagination. It displays operational changes while omitting contact values, notes, and review evidence. Reopening the timeline starts at the newest events. History is application audit evidence, not a log of every record read or cryptographic tamper evidence.
+
+The **CRM & automations** view now supports **Review outcome** for uncertain and failed deliveries. Staff record an assessment and evidence with optimistic concurrency and submission idempotency. The original provider status and immutable delivery snapshot remain unchanged. **Recover stale attempts** is explicit and group-wide; it only marks expired in-flight claims uncertain. Neither operation sends or retries a contact. The fictional demo includes **Simulate uncertainty** so this path can be shown safely.
+
+Verification: **875 backend tests passed, 1 skipped; 48 frontend tests passed**. Ruff, TypeScript, frontend lint, native Next.js and Vinext builds passed. Browser verification covered search, assignment, activity, queueing, simulated uncertainty, human review, and a repeated queue preserving the original result. The updated architecture diagrams rendered successfully. No new runtime dependencies or cloud services.
+
+Read [the operator walkthrough](OPERATOR_WORKFLOW.md) and [CRM review contract](INTEGRATION_REVIEW.md). **Owner actions:** complete the deferred Google registration; activate one receiver and investigate its real acknowledgements; assign a staff exception owner; approve operational data and retention policies. The product still needs controlled live-call evidence before being sold as an autonomous receptionist. No external CRM request, real call, or transcript redaction was used for this release's verification.
+
+Deployment evidence for this iteration is recorded in [cloud staging](CLOUD_STAGING.md); the release entry will be updated after rollout verification.
+
+
 ## October 2: architecture, queries, and retention follow-up
 
 Updated the [overall architecture](docs/architecture.md) and [query/response architecture](docs/query_response_architecture.md) with rendered Mermaid diagrams for deployment, voice turns, website reads/writes, and explicit CRM dispatch. The diagrams identify the implemented paths and outstanding provider/sign-in activation; source links connect the design to implementation.
 
-The group pipeline now filters overdue, upcoming, unscheduled, and unowned work, with an additional business-stage filter. These are server-side filters across the matching enquiry set; text search and CSV export still apply to the displayed page. Due queues exclude converted and closed enquiries. Stage totals respect location, timing, and ownership, while spanning all stages. Changing a pipeline filter fetches its pipeline page without reloading unrelated delivery and pilot data.
+The group pipeline now filters overdue, upcoming, unscheduled, and unowned work, with an additional business-stage filter. These are server-side filters across the matching enquiry set; at that release, text search and CSV export applied to the displayed page. The newer iteration above expands search across stored enquiries. Due queues exclude converted and closed enquiries. Stage totals respect location, timing, and ownership, while spanning all stages. Changing a pipeline filter fetches its pipeline page without reloading unrelated delivery and pilot data.
 
 The read-only **Data health** tab previews eligible transcript text without returning that text or exposing a cleanup button. Retention is dry-run by default and requires explicit `--apply` to clear eligible text. It preserves turn rows, timing, leads, workflow history, and CRM delivery/idempotency evidence. No staging or production text was redacted in this iteration. The detail view marks deliberate removal distinctly from missing text.
 

@@ -62,3 +62,28 @@ void test('conflict and validation failures have distinct recovery instructions'
     globalThis.fetch = original;
   }
 });
+
+void test('enquiry search keeps contact text out of URLs and uses read failure semantics', async () => {
+  const { searchPipeline } = await import('./client.ts');
+  const original = globalThis.fetch;
+  let seen = '';
+  let options: RequestInit | undefined;
+  globalThis.fetch = async (url, init) => {
+    seen = url instanceof Request ? url.url : url.toString();
+    options = init;
+    return Response.json({ items: [] });
+  };
+  try {
+    await searchPipeline('limit=50&due=overdue', 'Synthetic Person', undefined);
+    assert.equal(seen, '/api/console/pipeline/search?limit=50&due=overdue');
+    assert.equal(options?.method, 'POST');
+    assert.equal(options?.body, JSON.stringify({ query: 'Synthetic Person' }));
+    globalThis.fetch = async () => new Response('unavailable', { status: 503 });
+    await assert.rejects(
+      searchPipeline('', 'Synthetic Person'),
+      /could not load/,
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});

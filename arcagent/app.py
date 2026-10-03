@@ -14,6 +14,7 @@ from arcagent.agent.llm import AnthropicStructuredLLM
 from arcagent.agent.readiness import PromptReadinessError, require_ready_prompts
 from arcagent.agent.responder import GraphResponder
 from arcagent.config import Settings, get_settings
+from arcagent.console.activity import router as activity_router
 from arcagent.console.api import router as console_router
 from arcagent.console.pilot import router as pilot_router
 from arcagent.console.pipeline import router as pipeline_router
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ArcAgent", version=__version__, lifespan=lifespan)
 app.include_router(console_router)
+app.include_router(activity_router)
 app.include_router(pipeline_router)
 app.include_router(pilot_router)
 app.include_router(storage_router)

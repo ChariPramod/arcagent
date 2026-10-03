@@ -140,6 +140,8 @@ docs/                  architecture, scoring, conversation design, turn taking,
 |---|---|
 | [architecture.md](docs/architecture.md) | deployment, runtime, trust boundaries, and evidence |
 | [query_response_architecture.md](docs/query_response_architecture.md) | voice and workspace request flows, CRM delivery, and retention |
+| [Operator workflow](OPERATOR_WORKFLOW.md) | enquiry search, staff activity, and delivery investigation |
+| [CRM review guide](INTEGRATION_REVIEW.md) | human evidence, provider status, and stale recovery |
 | [Storage and query guide](STORAGE_AND_QUERY_OPTIMIZATION.md) | query evidence, bounded retention, and operator commands |
 | [scoring.md](docs/scoring.md) | the rule table, the threshold, worked examples |
 | [conversation_design.md](docs/conversation_design.md) | node responsibilities and the objection playbook |

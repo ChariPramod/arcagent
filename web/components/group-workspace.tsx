@@ -20,7 +20,9 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { StorageHealth } from '@/components/storage-health';
-import { read, write } from '@/lib/client';
+import { ActivityTimeline } from '@/components/activity-timeline';
+import { DeliveryReviewDialog } from '@/components/delivery-review';
+import { read, searchPipeline, write } from '@/lib/client';
 import {
   STAGES,
   STAGE_NAMES,
@@ -29,6 +31,9 @@ import {
   exportLeads,
   isOverdue,
   matchesWorkFilters,
+  matchesContactSearch,
+  REVIEW_LABELS,
+  type ActivityEvent,
   type DueFilter,
   type OwnerFilter,
   type PipelineLead,
@@ -80,6 +85,17 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
   const [total, setTotal] = useState(demo ? exampleLeads.length : 0);
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [reviewing, setReviewing] = useState<Delivery | null>(null);
+  const [demoActivity, setDemoActivity] = useState<
+    Record<number, ActivityEvent[]>
+  >({});
+  const activitySequence = useRef(0);
+  const deliverySequence = useRef(0);
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchTerm(query.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
   const [due, setDue] = useState<DueFilter>('all');
   const [owner, setOwner] = useState<OwnerFilter>('all');
   const [stageFilter, setStageFilter] = useState('all');
@@ -137,7 +153,10 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
     if (owner !== 'all') params.set('owner', owner);
     if (stageFilter !== 'all') params.set('stage', stageFilter);
     const load = <T,>(key: string, path: string, accept: (value: T) => void) =>
-      read<T>(path, controller.signal)
+      (key === 'pipeline' && searchTerm
+        ? searchPipeline<T>(params.toString(), searchTerm, controller.signal)
+        : read<T>(path, controller.signal)
+      )
         .then((value) => {
           if (!controller.signal.aborted) {
             accept(value);
@@ -153,7 +172,8 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
             setErrors((old) => ({ ...old, [key]: errorText(error) }));
         });
     const request =
-      tab === 'pipeline'
+      tab === 'pipeline' &&
+      !(searchTerm.length === 1 && !/^[1-9]$/.test(searchTerm))
         ? load<PipelinePage>('pipeline', `pipeline?${params}`, (value) => {
             setLeads(value.items);
             setTotal(value.total);
@@ -183,6 +203,7 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
     due,
     owner,
     stageFilter,
+    searchTerm,
     refresh,
     deliveryPage,
   ]);
@@ -193,18 +214,18 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
             (filter === 'unassigned'
               ? lead.location_id === null
               : lead.location_id === Number(filter))) &&
-          matchesWorkFilters(lead, due, owner),
+          matchesWorkFilters(lead, due, owner) &&
+          matchesContactSearch(lead, searchTerm),
       )
     : leads;
   const staged =
     demo && stageFilter !== 'all'
       ? scoped.filter((lead) => lead.stage === stageFilter)
       : scoped;
-  const visible = staged.filter((lead) =>
-    `${lead.name ?? ''} ${lead.assignee ?? ''} ${lead.call_id}`
-      .toLowerCase()
-      .includes(query.toLowerCase()),
-  );
+  const searchPending = query.trim() !== searchTerm;
+  const searchTooShort =
+    query.trim().length === 1 && !/^[1-9]$/.test(query.trim());
+  const visible = searchPending || searchTooShort ? [] : staged;
   const counts = demo
     ? Object.fromEntries(
         STAGES.map((stage) => [
@@ -229,6 +250,30 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
       : 'arcagent-displayed-leads.csv';
     anchor.click();
     URL.revokeObjectURL(url);
+  }
+  function recordDemoActivity(
+    callId: number,
+    entity: string,
+    action: string,
+    changes: ActivityEvent['changes'],
+    fields: string[],
+  ) {
+    const id = ++activitySequence.current;
+    const event: ActivityEvent = {
+      id,
+      entity,
+      entity_id: callId,
+      revision: id,
+      actor: 'Demo coordinator',
+      action,
+      changes,
+      fields_changed: fields,
+      created_at: new Date().toISOString(),
+    };
+    setDemoActivity((old) => ({
+      ...old,
+      [callId]: [event, ...(old[callId] ?? [])],
+    }));
   }
   async function saveLead(lead: PipelineLead) {
     if (
@@ -274,6 +319,19 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
     setLeads((old) =>
       old.map((item) => (item.call_id === updated.call_id ? updated : item)),
     );
+    if (demo)
+      recordDemoActivity(
+        lead.call_id,
+        'pipeline',
+        'updated',
+        {
+          stage: lead.stage,
+          assignee: lead.assignee,
+          location_id: lead.location_id,
+          next_action_at: lead.next_action_at,
+        },
+        Object.keys(payload).filter((key) => key !== 'revision'),
+      );
     setSelected(null);
     setMessage(
       demo
@@ -294,9 +352,16 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
       throw Error(
         'Assign an active location and save before queuing a CRM hand-off.',
       );
+    const existingDemo = demo
+      ? deliveries.find(
+          (item) =>
+            item.call_id === lead.call_id && item.destination === destination,
+        )
+      : undefined;
     const entry = demo
-      ? {
-          id: Date.now(),
+      ? (existingDemo ?? {
+          id: ++deliverySequence.current,
+          review_revision: 0,
           contact_name: lead.name ?? '',
           contact_phone: lead.callback_number ?? '',
           call_id: lead.call_id,
@@ -308,7 +373,7 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
           error_code: null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        }
+        })
       : await write<Delivery>('integrations/deliveries', {
           call_id: lead.call_id,
           destination,
@@ -327,10 +392,22 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
     );
     setSelected(null);
     setTab('integrations');
+    if (demo && !existingDemo)
+      recordDemoActivity(
+        lead.call_id,
+        'integration',
+        'queued',
+        { destination, status: 'queued', attempt_count: 0 },
+        ['destination', 'status'],
+      );
     setMessage(
       demo
-        ? 'Demo hand-off queued. Nothing was sent.'
-        : 'Contact queued. Review the delivery before sending.',
+        ? existingDemo
+          ? `Existing demo ${existingDemo.status} delivery found. Nothing was sent.`
+          : 'Demo hand-off queued. Nothing was sent.'
+        : entry.status === 'queued'
+          ? 'Contact queued. Review the delivery before sending.'
+          : `Existing ${entry.status} delivery found. Its snapshot and result are unchanged.`,
     );
     if (!demo) setRefresh((value) => value + 1);
   }
@@ -359,6 +436,26 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
       );
     } catch (error) {
       setMessage(errorText(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function recoverStale() {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = demo
+        ? { recovered: 0 }
+        : await write<{ recovered: number }>(
+            'integrations/deliveries/recover-stale',
+            { confirm_recovery: true, limit: 100 },
+          );
+      setMessage(
+        `${demo ? 'Demo: ' : ''}${result.recovered} expired attempt(s) marked uncertain. No external request was made.`,
+      );
+      if (!demo) setRefresh((value) => value + 1);
+    } catch (failure) {
+      setMessage(errorText(failure));
     } finally {
       setBusy(false);
     }
@@ -422,7 +519,9 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
                   {STAGE_NAMES[stage]}
                 </p>
                 <p className="text-3xl mt-3 tabular-nums">
-                  {errors.pipeline ? '—' : (counts[stage] ?? 0)}
+                  {errors.pipeline || searchPending || searchTooShort
+                    ? '—'
+                    : (counts[stage] ?? 0)}
                 </p>
               </div>
             ))}
@@ -510,24 +609,38 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
             </div>
             <Input
               className="sm:max-w-xs"
-              aria-label="Search displayed enquiries"
-              placeholder="Search this page…"
+              aria-label="Search all enquiries"
+              placeholder="Name, phone, or enquiry ID…"
+              maxLength={80}
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setOffset(0);
+              }}
             />
             <Button
               className="sm:ml-auto"
               variant="outline"
-              disabled={loading || !!errors.pipeline || !visible.length}
+              disabled={
+                loading ||
+                searchPending ||
+                searchTooShort ||
+                !!errors.pipeline ||
+                !visible.length
+              }
               onClick={download}
             >
               <Download size={15} />
               Export displayed leads
             </Button>
           </div>
-          {errors.pipeline ? (
+          {searchTooShort ? (
+            <Notice>
+              Enter at least two characters, or a complete numeric enquiry ID.
+            </Notice>
+          ) : errors.pipeline ? (
             <Notice>{errors.pipeline}</Notice>
-          ) : loading ? (
+          ) : loading || searchPending ? (
             <output className="block py-12 text-muted-foreground">
               Loading your group pipeline…
             </output>
@@ -604,9 +717,10 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
           <div className="flex flex-wrap gap-3 justify-between items-center text-xs text-muted-foreground">
             <p>
               Showing {visible.length} of {demo ? staged.length : total}{' '}
-              matching enquiries. Search and export apply to this page. Stage
-              totals cover location, timing, and ownership filters across all
-              stages. Timing filters exclude converted and closed enquiries.
+              matching enquiries. Search covers all stored enquiries; export
+              contains only displayed results. Stage totals cover search,
+              location, timing, and ownership filters across all stages. Timing
+              filters exclude converted and closed enquiries.
             </p>
             {!demo && (
               <div className="flex gap-2">
@@ -683,13 +797,26 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
                 </p>
                 <p className="text-xs mt-5 text-muted-foreground">
                   {destination.destination === 'hubspot'
-                    ? 'Contact creation with delivery tracking. An uncertain result requires review before another attempt.'
+                    ? 'Contact creation with delivery tracking. Investigate uncertain results; recording a review never resends a contact.'
                     : 'Receives a contact event with a location snapshot. Acknowledgement is not proof that the downstream CRM action completed.'}
                 </p>
               </article>
             ))}
           </div>
-          <h3 className="text-lg">Delivery history</h3>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-lg">Delivery history</h3>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => void recoverStale()}
+            >
+              Recover stale attempts
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Recovery covers this group and marks expired in-flight attempts
+            uncertain. It never sends or retries a contact.
+          </p>
           {errors.deliveries ? (
             <Notice>{errors.deliveries}</Notice>
           ) : deliveries.length ? (
@@ -711,6 +838,12 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
                       <br />
                       {entry.location_name} · {entry.attempt_count} attempt(s)
                     </p>
+                    {entry.latest_review && (
+                      <p className="text-xs mt-2 text-primary">
+                        {REVIEW_LABELS[entry.latest_review.resolution]} · review{' '}
+                        {entry.review_revision}
+                      </p>
+                    )}
                     {entry.error_code && (
                       <p className="text-xs text-destructive mt-2">
                         {entry.error_code}
@@ -726,6 +859,48 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
                       {demo ? 'Demo: ' : ''}
                       {entry.status}
                     </Badge>
+                    {['uncertain', 'failed'].includes(entry.status) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => setReviewing(entry)}
+                      >
+                        Review outcome
+                      </Button>
+                    )}
+                    {demo && entry.status === 'queued' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setDeliveries((old) =>
+                            old.map((item) =>
+                              item.id === entry.id
+                                ? {
+                                    ...item,
+                                    status: 'uncertain',
+                                    attempt_count: 1,
+                                    error_code: 'response_unknown',
+                                  }
+                                : item,
+                            ),
+                          );
+                          recordDemoActivity(
+                            entry.call_id,
+                            'integration',
+                            'uncertain',
+                            { status: 'uncertain', attempt_count: 1 },
+                            ['status'],
+                          );
+                          setMessage(
+                            'Simulated uncertain response. No external request was made. Review the outcome to record an assessment.',
+                          );
+                        }}
+                      >
+                        Simulate uncertainty
+                      </Button>
+                    )}
                     {entry.status === 'queued' && (
                       <Button
                         size="sm"
@@ -800,10 +975,49 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
         />
       )}
       {tab === 'storage' && <StorageHealth demo={demo} refresh={refresh} />}
+      {reviewing && (
+        <DeliveryReviewDialog
+          key={`${reviewing.id}:${reviewing.review_revision}`}
+          entry={reviewing}
+          demo={demo}
+          onClose={() => setReviewing(null)}
+          onReviewed={(review) => {
+            setDeliveries((old) =>
+              old.map((item) =>
+                item.id === review.delivery_id
+                  ? {
+                      ...item,
+                      review_revision: review.review_revision,
+                      latest_review: review,
+                    }
+                  : item,
+              ),
+            );
+            if (demo)
+              recordDemoActivity(
+                reviewing.call_id,
+                'integration',
+                'reviewed',
+                {
+                  resolution: review.resolution,
+                  provider_status: review.provider_status,
+                  review_revision: review.review_revision,
+                },
+                ['resolution'],
+              );
+            setReviewing(null);
+            setMessage(
+              'Operator review recorded. Provider status is unchanged; nothing was resent.',
+            );
+            if (!demo) setRefresh((value) => value + 1);
+          }}
+        />
+      )}
       {selected && (
         <LeadEditor
           key={selected.call_id}
           lead={selected}
+          activity={demoActivity[selected.call_id] ?? []}
           locations={locations}
           destinations={destinations}
           demo={demo}
@@ -817,6 +1031,7 @@ export function GroupWorkspace({ demo }: { demo: boolean }) {
 }
 function LeadEditor({
   lead,
+  activity,
   locations,
   destinations,
   demo,
@@ -825,6 +1040,7 @@ function LeadEditor({
   onQueue,
 }: {
   lead: PipelineLead;
+  activity: ActivityEvent[];
   locations: Location[];
   destinations: Destination[];
   demo: boolean;
@@ -1069,6 +1285,11 @@ function LeadEditor({
             </p>
           )}
         </div>
+        <ActivityTimeline
+          callId={lead.call_id}
+          demo={demo}
+          demoItems={activity}
+        />
       </DialogContent>
     </Dialog>
   );

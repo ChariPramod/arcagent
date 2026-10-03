@@ -137,6 +137,7 @@ def serialize_delivery(row: IntegrationDelivery) -> dict:
             "destination",
             "status",
             "attempt_count",
+            "review_revision",
             "error_code",
             "created_by",
             "updated_by",

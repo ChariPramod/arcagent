@@ -15,13 +15,17 @@ flowchart LR
     Web <-->|Authorization code and verified identity| Identity[Configured OIDC provider]
     Web <-->|Server credential and trusted actor| API
     API <-->|SQLAlchemy| DB[(Cloud SQL PostgreSQL)]
+    API -->|Protected search and cursor history| Activity[Staff read projections]
+    Activity --> DB
+    API -->|Explicit review or stale recovery| Review[Reconciliation transactions]
+    Review --> DB
     API -->|Explicit contact dispatch| CRM[HubSpot or approved automation webhook]
     Jobs[Operator-run migration and recovery commands] --> DB
     Secrets[Server secrets] --> API
     Secrets --> Web
 ```
 
-This diagram describes the implemented paths, including provider connections that are not activated. The browser receives workspace responses, not backend bearer credentials or database credentials. Voice signatures and website identity protect different entry points. Production voice checks do not accept the development signature bypass. Console authorization is enforced again at the backend.
+This diagram describes the implemented paths, including provider connections that are not activated. Staff read projections and reconciliation transactions are modules inside the same backend, not additional cloud services. The browser receives workspace responses, not backend bearer credentials or database credentials. Voice signatures and website identity protect different entry points. Production voice checks do not accept the development signature bypass. Console authorization is enforced again at the backend.
 
 The staging backend and persistent database have been deployed, and synthetic authenticated reads and writes have been observed. The website is hosted separately. Google client registration and operator approval remain activation work; missing authentication configuration blocks the workspace. Voice credentials, approved prompts, and controlled real-call validation remain outstanding. CRM adapter implementation does not establish a successful live export. See [cloud deployment evidence](../CLOUD_STAGING.md), [identity and call activation](../NATIVE_AUTH_AND_LIVE_VALIDATION.md), and [integration activation](../INTEGRATIONS_SETUP.md) for current release evidence and owner steps. A local source change is not deployed until its release and migration are recorded there.
 
@@ -36,8 +40,8 @@ The staging deployment uses disposable application instances and a persistent da
 | Conversation | Traverse a bounded graph, validate node-owned structured model output, compute deterministic qualification | [graph](../arcagent/agent/graph.py), [LLM](../arcagent/agent/llm.py), [scoring](../arcagent/agent/scoring.py) |
 | End-of-call actions | Persist qualification before transfer or callback action; distinguish request acceptance from observed outcome | [routing](../arcagent/telephony/routing.py), [transfer state](../arcagent/telephony/transfer_state.py) |
 | Website access | Verify identity, enforce operator allowlist and same-origin writes, proxy approved API routes | [native auth](../web/lib/native-auth.ts), [proxy](../web/lib/proxy.ts) |
-| Staff workflow | Store location assignment, stage, ownership, due dates, contact corrections, and revision-checked audit history | [pipeline](../arcagent/console/pipeline.py), [workflows](../arcagent/console/workflows.py) |
-| Contact export | Persist an immutable minimal payload, claim an attempt before network I/O, reconcile uncertain outcomes | [integration service](../arcagent/integrations/service.py), [worker](../arcagent/integrations/worker.py) |
+| Staff workflow | Search latest contacts using a protected request body; store assignment, ownership, due dates and revision-checked edits; expose a minimized cursor-based activity timeline | [pipeline](../arcagent/console/pipeline.py), [workflows](../arcagent/console/workflows.py), [activity](../arcagent/console/activity.py) |
+| Contact export | Persist an immutable minimal payload, claim an attempt before network I/O, recover stale claims and record human review separately from provider outcomes | [integration service](../arcagent/integrations/service.py), [worker](../arcagent/integrations/worker.py), [reviews](../arcagent/integrations/reviews.py) |
 | Evidence and storage | Persist call/turn records, expose bounded reads, redact eligible transcript text without deleting delivery intent | [models](../arcagent/persistence/models.py), [console](../arcagent/console/api.py), [retention command](../scripts/purge_old_data.py) |
 
 The deployment represents a shared dental-group workspace with location filters. Location assignment is not a tenant isolation boundary. All allowed operators belong to the same group access boundary. An independently isolated clinic product would require additional authorization and data partitioning.
@@ -60,12 +64,13 @@ The graph controls the conversation; structured model output supplies extraction
 | Location and lead pipeline | Staff assignment, owner, next action, and manually maintained business stage | Automatic verification of attendance, treatment, payment, or revenue |
 | Transfer attempt and progress | Persisted intent, vendor acceptance, and authenticated callback evidence | Acceptance alone is not an answered transfer; an answered child leg alone does not prove a bridge |
 | Integration delivery | Contact export intent, attempt status, and acknowledgement classification | A webhook acknowledgement does not prove its downstream automation completed |
+| Integration review | An operator's recorded investigation and resolution, with its own revision and evidence | Independent verification by the application or permission to resend an uncertain delivery |
 | Follow-up and audit | Human recovery work and who changed a record | Completion of the external action unless independently evidenced |
 | Evaluation run and result | Versioned simulation evidence for regression comparison | Real-call latency or production performance |
 
 Schemas are split across [core models](../arcagent/persistence/models.py), [pipeline models](../arcagent/persistence/pipeline_models.py), [transfer models](../arcagent/persistence/transfer_models.py), [integration models](../arcagent/persistence/integration_models.py), and [workflow models](../arcagent/persistence/workflow_models.py).
 
-The call table stores a caller-number hash. Leads contain contact data, transcripts can contain sensitive speech, and integration payload snapshots duplicate the minimal contact fields required for dispatch. No application audio recording is persisted by the live session path. This is not a claim that every provider or evaluation artifact is free of sensitive data.
+The call table stores a caller-number hash. Leads contain contact data, transcripts can contain sensitive speech, and integration payload snapshots duplicate the minimal contact fields required for dispatch. Search terms travel in a protected JSON body rather than a URL. Activity responses expose recognized operational values and the names of edited private fields without copying their values. Human review evidence remains in authenticated review records and is not duplicated into timeline changes. No application audio recording is persisted by the live session path. This is not a claim that every provider or evaluation artifact is free of sensitive data.
 
 The retention command defaults to preview. Explicit application redacts eligible completed-call transcript text while retaining turn timing, calls, leads, workflow history, and delivery/idempotency evidence. It does not delete backups, vendor copies, evaluation transcripts, extracted fields, or contact snapshots. It is not scheduled automatically. The [query and response guide](query_response_architecture.md) explains storage inspection and mutation behavior.
 

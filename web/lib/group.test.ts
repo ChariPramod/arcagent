@@ -91,3 +91,18 @@ void test('work filters identify overdue, scheduled, unowned and unscheduled ope
     false,
   );
 });
+
+void test('demo contact search matches names, phone numbers and exact single-digit IDs', async () => {
+  const { matchesContactSearch } = await import('./group.ts');
+  assert.equal(
+    matchesContactSearch({ ...lead, name: 'Synthetic Ellis' }, 'ELLIS'),
+    true,
+  );
+  assert.equal(matchesContactSearch(lead, '+155'), true);
+  assert.equal(matchesContactSearch(lead, '1'), true);
+  assert.equal(matchesContactSearch({ ...lead, call_id: 123 }, '1'), false);
+  assert.equal(
+    matchesContactSearch({ ...lead, name: 'Contact A' }, '%'),
+    false,
+  );
+});

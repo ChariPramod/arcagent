@@ -1,7 +1,30 @@
-export async function read<T>(
+export function read<T>(
   path: string,
   signal?: AbortSignal,
   timeoutMs = 10000,
+): Promise<T> {
+  return readRequest<T>(path, signal, timeoutMs);
+}
+
+/** Contact text stays in a JSON body, never a URL or local storage. */
+export function searchPipeline<T>(
+  params: string,
+  query: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  return readRequest<T>(
+    `pipeline/search${params ? `?${params}` : ''}`,
+    signal,
+    10000,
+    { query },
+  );
+}
+
+async function readRequest<T>(
+  path: string,
+  signal?: AbortSignal,
+  timeoutMs = 10000,
+  requestBody?: unknown,
 ): Promise<T> {
   signal?.throwIfAborted();
   const controller = new AbortController();
@@ -16,6 +39,13 @@ export async function read<T>(
     const response = await fetch(`/api/console/${path}`, {
       cache: 'no-store',
       signal: controller.signal,
+      ...(requestBody !== undefined
+        ? {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+          }
+        : {}),
     });
     let body: unknown;
     try {

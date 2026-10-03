@@ -1,16 +1,17 @@
 """Single-group conversion tracking. Includes all stored leads, including test records."""
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import AwareDatetime, Field, field_validator, model_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import AwareDatetime, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import load_only
+from sqlalchemy.orm import Session, load_only
 
 from arcagent.console.api import Database, authenticate, iso
+from arcagent.console.query_budget import limit_query_time
 from arcagent.console.workflows import Actor, Input, RecordId, audit, commit, serialize
 from arcagent.persistence.models import Call, Lead
 from arcagent.persistence.pipeline_models import LeadPipeline, Location, LocationAudit
@@ -19,6 +20,7 @@ from arcagent.persistence.workflow_models import WorkflowAudit
 router = APIRouter(prefix="/api/console", dependencies=[Depends(authenticate)], tags=["pipeline"])
 Stage = Literal["new", "contacted", "booked", "won", "lost"]
 STAGES = ("new", "contacted", "booked", "won", "lost")
+SEARCH_INPUT_ERROR = "Provide printable text of 2 to 80 characters, or a positive call ID"
 
 
 class EditPipeline(Input):
@@ -60,10 +62,10 @@ def item(call, lead, state, location_name):
     }
 
 
-def rows():
+def latest_lead_id():
     # Historical schemas do not constrain lead.call_id uniquely. Treat one call
     # as one enquiry and deterministically use its latest saved lead record.
-    latest = (
+    return (
         select(Lead.id)
         .where(Lead.call_id == Call.id)
         .order_by(Lead.id.desc())
@@ -71,10 +73,13 @@ def rows():
         .correlate(Call)
         .scalar_subquery()
     )
+
+
+def rows():
     return (
         select(Call, Lead, LeadPipeline, Location.name)
         .select_from(Call)
-        .join(Lead, Lead.id == latest)
+        .join(Lead, Lead.id == latest_lead_id())
         .outerjoin(LeadPipeline, LeadPipeline.call_id == Call.id)
         .outerjoin(Location, Location.id == LeadPipeline.location_id)
     )
@@ -90,6 +95,76 @@ def pipeline(
     unassigned: bool = False,
     due: Literal["overdue", "scheduled", "unscheduled"] | None = None,
     owner: Literal["unassigned"] | None = None,
+):
+    return pipeline_page(session, limit, offset, stage, location_id, unassigned, due, owner)
+
+
+class SearchInput(Input):
+    query: str = Field(
+        min_length=1,
+        max_length=80,
+        description="Printable text of 2 to 80 characters, or a positive ASCII call ID",
+    )
+
+    @field_validator("query")
+    @classmethod
+    def printable_query(cls, value: str) -> str:
+        if not value.isprintable() or (len(value) == 1 and value not in "123456789"):
+            raise ValueError("Use printable text or a positive ASCII call ID")
+        return value
+
+
+async def search_input(request: Request) -> SearchInput:
+    # FastAPI's default validation response echoes invalid input. Parse this
+    # sensitive body after authentication and return one sanitized error instead.
+    payload = bytearray()
+    async for chunk in request.stream():
+        if len(payload) + len(chunk) > 4096:
+            raise HTTPException(422, SEARCH_INPUT_ERROR)
+        payload.extend(chunk)
+    try:
+        return SearchInput.model_validate_json(payload)
+    except ValidationError:
+        pass
+    raise HTTPException(422, SEARCH_INPUT_ERROR)
+
+
+@router.post(
+    "/pipeline/search",
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": SearchInput.model_json_schema()}},
+        }
+    },
+)
+def search_pipeline(
+    body: Annotated[SearchInput, Depends(search_input)],
+    session: Database,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=1_000_000),
+    stage: Stage | None = None,
+    location_id: int | None = Query(None, gt=0, le=2_147_483_647),
+    unassigned: bool = False,
+    due: Literal["overdue", "scheduled", "unscheduled"] | None = None,
+    owner: Literal["unassigned"] | None = None,
+):
+    limit_query_time(session)
+    return pipeline_page(
+        session, limit, offset, stage, location_id, unassigned, due, owner, body.query
+    )
+
+
+def pipeline_page(
+    session: Session,
+    limit: int,
+    offset: int,
+    stage: Stage | None,
+    location_id: int | None,
+    unassigned: bool,
+    due: Literal["overdue", "scheduled", "unscheduled"] | None,
+    owner: Literal["unassigned"] | None,
+    search: str | None = None,
 ):
     conditions = []
     if location_id is not None and unassigned:
@@ -118,13 +193,30 @@ def pipeline(
     # Aggregate all stages after work filters, before the optional stage filter.
     # A page or stage selection never changes the board's other stage counts.
     base = rows().where(*conditions)
-    grouped = (
+    summary_query = (
         select(func.coalesce(LeadPipeline.stage, "new").label("stage"))
         .select_from(Call)
         .outerjoin(LeadPipeline, LeadPipeline.call_id == Call.id)
-        .where(*conditions, select(Lead.id).where(Lead.call_id == Call.id).exists())
-        .subquery()
+        .where(*conditions)
     )
+    if search is not None:
+        # A single digit is a direct enquiry lookup, never a broad phone search.
+        matches = (
+            []
+            if len(search) == 1
+            else [
+                Lead.name.icontains(search, autoescape=True),
+                Lead.callback_number.icontains(search, autoescape=True),
+            ]
+        )
+        if search.isascii() and search.isdecimal() and 0 < int(search) <= 2_147_483_647:
+            matches.append(Call.id == int(search))
+        match = or_(*matches)
+        base = base.where(match)
+        summary_query = summary_query.join(Lead, Lead.id == latest_lead_id()).where(match)
+    else:
+        summary_query = summary_query.where(select(Lead.id).where(Lead.call_id == Call.id).exists())
+    grouped = summary_query.subquery()
     counts = dict(
         session.execute(select(grouped.c.stage, func.count()).group_by(grouped.c.stage)).all()
     )

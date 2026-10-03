@@ -1,5 +1,14 @@
 # ArcAgent iterative delivery plan
 
+## October 2: searchable enquiries and accountable delivery reviews
+
+Implemented cross-page name/phone/call-ID search with sensitive query text in a POST body, bounded authenticated activity history, and append-only human CRM reviews. Reviews retain provider outcomes and immutable snapshots; an independent review revision protects concurrent staff work. Explicit stale recovery changes only expired sending claims to uncertain and never dispatches a contact. The fictional demo now exercises uncertainty and review as well as simulated receipt. Updated both architecture diagrams to match these flows.
+
+Acceptance covered literal wildcard handling, latest-contact search, combined filters, sanitized failures, cursor paging with concurrent inserts, private-value omission, lost review responses, UUID rebinding, stale staff edits, rollback, lease fencing, and batched latest-review loading. Full validation: 875 backend tests passed, 1 skipped; 48 frontend tests passed; Ruff, typecheck, lint, and both website builds passed. The browser walkthrough verified search, edit history, uncertainty, review, and duplicate-queue preservation. No new dependencies or cloud resources.
+
+Next valuable loop: activate Google and one owner-controlled receiver, then collect real pilot acceptance evidence. Before adding new connectors, prioritize destination-specific deduplication and a reviewed retry policy for actually rejected exports. Benchmark representative PostgreSQL search data before selecting trigram indexing or changing pagination. The current shared-group permission boundary must be revisited before serving unrelated buyers. Voice promotion still requires approved prompts, independent personas, vendor credentials, and controlled answered/no-answer and latency evidence.
+
+
 ## October 2: evidence-preserving retention and efficient reads
 
 Update architecture diagrams against source, replace bulky list reads with narrow projections, add measured indexes, preserve latency during bounded transcript redaction, and surface work queues and read-only storage health. Verify at existing HTTP, retention-command, proxy, migration, and public filtering interfaces. No live redaction is part of release verification. Keep full evidence detail reads and explicit CRM dispatch semantics intact. Review synthetic query plans without extrapolating production performance.

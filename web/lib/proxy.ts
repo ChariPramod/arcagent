@@ -29,10 +29,12 @@ export async function proxyConsole(
     return json({ detail: 'Your workspace is not connected yet.' }, 503);
   const route = path.join('/');
   const method = request.method.toUpperCase();
+  const searchRead = method === 'POST' && route === 'pipeline/search';
+  const readOperation = method === 'GET' || searchRead;
   const readable =
     /^(calls|evals)(\/\d+)?$/.test(route) ||
     /^(followups|feedback)(\/\d+\/(audit|export))?$/.test(route) ||
-    /^calls\/\d+\/latency$/.test(route) ||
+    /^calls\/\d+\/(latency|activity)$/.test(route) ||
     [
       'compare',
       'operations',
@@ -44,18 +46,23 @@ export async function proxyConsole(
       'pilot',
       'storage',
     ].includes(route) ||
-    /^(pipeline|locations)\/\d+\/audit$/.test(route);
+    /^(pipeline|locations)\/\d+\/audit$/.test(route) ||
+    /^integrations\/deliveries\/\d+\/reviews$/.test(route);
   const writable =
     (method === 'POST' &&
       (/^(followups|feedback)$/.test(route) ||
         /^feedback\/\d+\/review$/.test(route) ||
-        ['lab/replay', 'locations', 'integrations/deliveries'].includes(
-          route,
-        ) ||
-        /^integrations\/deliveries\/\d+\/send$/.test(route))) ||
+        [
+          'lab/replay',
+          'locations',
+          'integrations/deliveries',
+          'integrations/deliveries/recover-stale',
+        ].includes(route) ||
+        /^integrations\/deliveries\/\d+\/(send|reviews)$/.test(route))) ||
     (method === 'PATCH' && /^(followups|pipeline|locations)\/\d+$/.test(route));
-  if (!readable && !writable) return json({ detail: 'Not found' }, 404);
-  if (method !== 'GET' && !writable)
+  if (!readable && !writable && !searchRead)
+    return json({ detail: 'Not found' }, 404);
+  if (method !== 'GET' && !writable && !searchRead)
     return json({ detail: 'Method not allowed' }, 405);
   let payload: string | undefined;
   if (method !== 'GET') {
@@ -125,7 +132,7 @@ export async function proxyConsole(
     }
   }
   const stage = query.get('stage');
-  if (stage && route === 'pipeline') {
+  if (stage && ['pipeline', 'pipeline/search'].includes(route)) {
     if (!['new', 'contacted', 'booked', 'won', 'lost'].includes(stage))
       return json({ detail: 'Invalid stage' }, 400);
     upstream.searchParams.set('stage', stage);
@@ -135,14 +142,14 @@ export async function proxyConsole(
     ['owner', ['unassigned']],
   ] as const) {
     const value = query.get(key);
-    if (value !== null && route === 'pipeline') {
+    if (value !== null && ['pipeline', 'pipeline/search'].includes(route)) {
       if (!(values as readonly string[]).includes(value))
         return json({ detail: 'Invalid work filter' }, 400);
       upstream.searchParams.set(key, value);
     }
   }
   const unassigned = query.get('unassigned');
-  if (unassigned !== null && route === 'pipeline') {
+  if (unassigned !== null && ['pipeline', 'pipeline/search'].includes(route)) {
     if (!['true', 'false'].includes(unassigned))
       return json({ detail: 'Invalid location filter' }, 400);
     upstream.searchParams.set('unassigned', unassigned);
@@ -157,7 +164,10 @@ export async function proxyConsole(
       body: payload,
       headers: {
         ...(method !== 'GET'
-          ? { 'Content-Type': 'application/json', 'X-Arcagent-Actor': userId }
+          ? {
+              'Content-Type': 'application/json',
+              ...(!searchRead ? { 'X-Arcagent-Actor': userId } : {}),
+            }
           : {}),
         Authorization: `Bearer ${config.token}`,
         Accept: 'application/json',
@@ -182,10 +192,9 @@ export async function proxyConsole(
     )
       return json(
         {
-          detail:
-            method === 'GET'
-              ? 'The workspace connection is unavailable. Please try again.'
-              : 'The action may have been saved. Refresh the record before trying again.',
+          detail: readOperation
+            ? 'The workspace connection is unavailable. Please try again.'
+            : 'The action may have been saved. Refresh the record before trying again.',
         },
         503,
       );
@@ -194,10 +203,9 @@ export async function proxyConsole(
   } catch {
     return json(
       {
-        detail:
-          method === 'GET'
-            ? 'We could not reach your workspace. Please try again.'
-            : 'The action may have been saved. Refresh the record before trying again.',
+        detail: readOperation
+          ? 'We could not reach your workspace. Please try again.'
+          : 'The action may have been saved. Refresh the record before trying again.',
       },
       503,
     );

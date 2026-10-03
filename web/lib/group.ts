@@ -43,7 +43,50 @@ export type Destination = {
   configured: boolean;
   detail: string;
 };
+export type DeliveryReview = {
+  id: number;
+  delivery_id: number;
+  provider_status: string;
+  attempt_count: number;
+  review_revision: number;
+  resolution: 'verified_received' | 'verified_not_received' | 'needs_followup';
+  evidence: string;
+  created_by: string;
+  created_at: string;
+};
+export type ActivityEvent = {
+  id: number;
+  entity: string;
+  entity_id: number;
+  revision: number;
+  actor: string;
+  action: string;
+  changes: Record<string, string | number | boolean | null>;
+  fields_changed: string[];
+  created_at: string;
+};
+export const REVIEW_LABELS = {
+  verified_received: 'Operator reports received',
+  verified_not_received: 'Operator reports not received',
+  needs_followup: 'Further investigation needed',
+};
+export function matchesContactSearch(
+  lead: PipelineLead,
+  query: string,
+): boolean {
+  const text = query.trim().toLowerCase();
+  if (/^[1-9]$/.test(text)) return lead.call_id === Number(text);
+  return (
+    !text ||
+    (lead.name ?? '').toLowerCase().includes(text) ||
+    (lead.callback_number ?? '').toLowerCase().includes(text) ||
+    (/^[0-9]+$/.test(text) && Number(text) === lead.call_id)
+  );
+}
+
 export type Delivery = {
+  review_revision: number;
+  latest_review?: DeliveryReview | null;
   contact_name: string;
   contact_phone: string;
   id: number;
