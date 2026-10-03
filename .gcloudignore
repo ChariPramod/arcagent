@@ -23,3 +23,5 @@
 **/*.dump
 **/*.pem
 **/*.key
+
+**/.DS_Store

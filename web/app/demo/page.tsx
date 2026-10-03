@@ -11,15 +11,17 @@ export default async function Demo({
     <Console
       demo
       initialView={
-        params.view === 'lab'
-          ? 'lab'
-          : params.view === 'workflows'
-            ? 'workflows'
-            : params.call || params.view === 'calls'
-              ? 'calls'
-              : params.view === 'evaluations'
-                ? 'evaluations'
-                : 'operations'
+        params.view === 'group' || (!params.view && !params.call)
+          ? 'group'
+          : params.view === 'lab'
+            ? 'lab'
+            : params.view === 'workflows'
+              ? 'workflows'
+              : params.call || params.view === 'calls'
+                ? 'calls'
+                : params.view === 'evaluations'
+                  ? 'evaluations'
+                  : 'operations'
       }
       initialCall={
         demoCalls.some((call) => call.id === Number(params.call))

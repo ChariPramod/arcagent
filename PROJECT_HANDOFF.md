@@ -1,5 +1,24 @@
 # ArcAgent build status and owner handoff
 
+## October 2: multi-location dental group pilot
+
+The new default demo and authenticated workspace open on **Group workspace**. Staff can manage clinic locations and time zones, assign enquiries, correct contact details, record owners and next actions, track business stages, and export the displayed page as spreadsheet-safe CSV. Pipeline stages are staff-entered business outcomes, separate from telephone outcomes. Concurrent edits use revisions and persist audit records.
+
+CRM hand-offs use a durable queue with immutable contact/location snapshots, explicit operator dispatch, bounded safe retries, and an uncertain state when remote acceptance cannot be established. Supported destinations are HubSpot contact creation or a configured Zapier, Make, or n8n cloud webhook. No CRM account is connected yet. Follow-up tracking is implemented; automated patient messaging and automatic CRM task creation are not implied.
+
+**Your activation steps:**
+
+1. Complete the deferred Google OAuth setup in [NATIVE_AUTH_AND_LIVE_VALIDATION.md](NATIVE_AUTH_AND_LIVE_VALIDATION.md), then approve the group's operators. The public demo uses fictional data and does not require sign-in.
+2. Create the group's actual locations and confirm who owns each follow-up. Everyone admitted to this workspace can access all locations. Do not use it for unrelated businesses or promise branch-restricted permissions.
+3. Choose HubSpot or one automation receiver. Put its credentials in backend secrets using [INTEGRATIONS_SETUP.md](INTEGRATIONS_SETUP.md). Review the receiving workflow, minimal contact payload, deduplication, and exception owner.
+4. Verify a fictional contact through queue, explicit send, and the destination's own record. A webhook acknowledgement does not establish downstream follow-up completion. No real external delivery was performed during implementation.
+5. Use [COMMERCIAL_PILOT_PLAN.md](COMMERCIAL_PILOT_PLAN.md) for the two-day acceptance checklist and demo sequence. Position the offer as a supervised enquiry follow-up pilot until live voice gates pass.
+
+Local release verification: **797 backend tests passed, 1 skipped; 43 frontend tests passed**. Ruff, frontend typecheck/lint, native Next.js and Vinext builds passed. Browser walkthrough verified fictional location assignment, contact correction, CRM queueing and simulated receipt. External receiver behavior remains unverified.
+
+No additional runtime dependencies or cloud services are needed for this iteration. Existing voice prompts, independent personas, provider setup, observed phone trials, backup/restore evidence, and production access/retention review remain required before live patient operation.
+
+
 Updated September 22, 2026. This is the practical handoff for the current repository, not a claim of production readiness. Read it alongside [the iteration log](ITERATION_PLAN.md), [controlled voice testing](VOICE_TESTING.md), [the data/cloud playbook](DATA_CLOUD_AND_VALIDATION_PLAYBOOK.md), and [website setup](web/SETUP.md).
 
 ## Latest implementation: native identity and verified transfer evidence
@@ -28,7 +47,7 @@ Do not pay for a benchmark using the current placeholder prompts. Do not describ
 | Voice pipeline | FastAPI, Twilio media transport, Deepgram recognition, graph-based conversation, Cartesia speech, persistence | Application integration and tested lifecycle behavior |
 | Decision logic | Deterministic qualification scoring and routing rules | The model does not choose the hot/cold threshold |
 | Text evaluations | Saved persona/prompt inputs, hashes, transcripts, guarded comparisons, delivery-mutation fixtures | Inspectable text experiments with compatibility checks |
-| Website | Product landing page, fictional demo, authenticated read-only workspace, call/evaluation review, backend proxy | A product interface; connecting live data is a separate setup step |
+| Website | Product landing page, fictional demo, authenticated workspace, call/evaluation review, backend proxy | A product interface; connecting live data is a separate setup step |
 | Endpoint protection | Media authentication before vendor startup, protected coordinator administration, disabled-by-default echo | Tested rejection and capability separation |
 | Turn handling | Finalized transcript segment assembly, boundary handling, interruption cancellation, per-utterance mark ownership | Regression coverage for lost segments and playback races |
 | Failure handling | Bounded acknowledgement waits, synthesis cleanup, partial startup cleanup, safe disconnect behavior | Tested failure paths do not silently become successful routing |

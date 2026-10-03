@@ -249,3 +249,57 @@ void test('independent review denial is a definite rejection, not an uncertain s
   assert.equal(response.status, 403);
   assert.match(await response.text(), /independent reviewer/);
 });
+
+void test('group routes preserve location scope and derive CRM actor server-side', async () => {
+  let seen: URL | undefined;
+  let sent: RequestInit | undefined;
+  const transport: typeof fetch = async (input, init) => {
+    seen = new URL(input instanceof Request ? input.url : input.toString());
+    sent = init;
+    return Response.json({ items: [] });
+  };
+  const result = await proxyConsole(
+    new Request(
+      'https://site.example/api/console/pipeline?location_id=2&stage=new&unassigned=false&destination=evil',
+    ),
+    ['pipeline'],
+    'owner',
+    config,
+    transport,
+  );
+  assert.equal(result.status, 200);
+  assert.equal(seen?.searchParams.get('location_id'), '2');
+  assert.equal(seen?.searchParams.get('stage'), 'new');
+  assert.equal(seen?.searchParams.get('destination'), null);
+  const dispatched = await proxyConsole(
+    new Request(
+      'https://site.example/api/console/integrations/deliveries/1/send',
+      {
+        method: 'POST',
+        headers: {
+          origin: 'https://site.example',
+          'content-type': 'application/json',
+          'X-Arcagent-Actor': 'forged',
+        },
+        body: JSON.stringify({
+          confirm_delivery: true,
+          expected_attempt_count: 0,
+        }),
+      },
+    ),
+    ['integrations', 'deliveries', '1', 'send'],
+    'owner',
+    config,
+    transport,
+  );
+  assert.equal(dispatched.status, 200);
+  assert.equal(new Headers(sent?.headers).get('X-Arcagent-Actor'), 'owner');
+  const denied = await proxyConsole(
+    new Request('https://site.example/api/console/integrations/secrets'),
+    ['integrations', 'secrets'],
+    'owner',
+    config,
+    never,
+  );
+  assert.equal(denied.status, 404);
+});

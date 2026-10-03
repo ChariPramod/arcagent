@@ -5,6 +5,7 @@ import { useConversationTool } from '@/lib/use-conversation-tool';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import {
   Activity,
+  Building2,
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
@@ -49,6 +50,11 @@ import {
 import { Choice } from '@/components/choice';
 import { CallReview } from '@/components/call-detail';
 import { Operations } from '@/components/operations';
+const GroupWorkspace = lazy(() =>
+  import('@/components/group-workspace').then((module) => ({
+    default: module.GroupWorkspace,
+  })),
+);
 const Workflows = lazy(() =>
   import('@/components/workflows').then((module) => ({
     default: module.Workflows,
@@ -75,7 +81,13 @@ import {
   outcomeLabels,
 } from '@/lib/domain';
 import type { CallDetail, CallSummary, Page } from '@/lib/domain';
-type View = 'operations' | 'calls' | 'evaluations' | 'workflows' | 'lab';
+type View =
+  | 'group'
+  | 'operations'
+  | 'calls'
+  | 'evaluations'
+  | 'workflows'
+  | 'lab';
 export function Console({
   demo,
   userName = 'Demo workspace',
@@ -177,15 +189,17 @@ export function Console({
             <span className="text-sm text-muted-foreground">
               Workspace <span className="mx-2 text-border">/</span>
               <span className="text-foreground">
-                {view === 'operations'
-                  ? 'Operations'
-                  : view === 'calls'
-                    ? 'Conversations'
-                    : view === 'workflows'
-                      ? 'Follow-up & feedback'
-                      : view === 'lab'
-                        ? 'Failure lab'
-                        : 'Evaluations'}
+                {view === 'group'
+                  ? 'Group workspace'
+                  : view === 'operations'
+                    ? 'Operations'
+                    : view === 'calls'
+                      ? 'Conversations'
+                      : view === 'workflows'
+                        ? 'Follow-up & feedback'
+                        : view === 'lab'
+                          ? 'Failure lab'
+                          : 'Evaluations'}
               </span>
             </span>
           </div>
@@ -212,7 +226,11 @@ export function Console({
           </div>
         )}
         <main className="workspace-content" id="main">
-          {view === 'operations' ? (
+          {view === 'group' ? (
+            <Suspense fallback={<Skeleton className="h-96" />}>
+              <GroupWorkspace demo={demo} />
+            </Suspense>
+          ) : view === 'operations' ? (
             <Operations
               demo={demo}
               onReviewCall={(id) => {
@@ -612,6 +630,16 @@ function SideNav({
             Your workspace
           </SidebarGroupLabel>
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className="h-11 px-3"
+                isActive={view === 'group'}
+                onClick={() => go('group')}
+              >
+                <Building2 size={17} />
+                <span>Group workspace</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="h-11 px-3"

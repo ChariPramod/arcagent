@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     console_api_token: str = Field(default="", repr=False)
     admin_api_token: str = Field(default="", repr=False)
 
+    # Optional group CRM adapters. Server-only; never exposed to the browser.
+    hubspot_access_token: str = Field(default="", repr=False)
+    automation_webhook_url: str = Field(default="", repr=False)
+    integration_delivery_timeout_s: float = Field(default=5, ge=1, le=10)
+
     # Conversation behaviour
     prompt_version: str = "v1"
     handoff_threshold: int = 60

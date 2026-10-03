@@ -33,13 +33,26 @@ export async function proxyConsole(
     /^(calls|evals)(\/\d+)?$/.test(route) ||
     /^(followups|feedback)(\/\d+\/(audit|export))?$/.test(route) ||
     /^calls\/\d+\/latency$/.test(route) ||
-    ['compare', 'operations', 'lab/scenarios'].includes(route);
+    [
+      'compare',
+      'operations',
+      'lab/scenarios',
+      'pipeline',
+      'locations',
+      'integrations',
+      'integrations/deliveries',
+      'pilot',
+    ].includes(route) ||
+    /^(pipeline|locations)\/\d+\/audit$/.test(route);
   const writable =
     (method === 'POST' &&
       (/^(followups|feedback)$/.test(route) ||
         /^feedback\/\d+\/review$/.test(route) ||
-        route === 'lab/replay')) ||
-    (method === 'PATCH' && /^followups\/\d+$/.test(route));
+        ['lab/replay', 'locations', 'integrations/deliveries'].includes(
+          route,
+        ) ||
+        /^integrations\/deliveries\/\d+\/send$/.test(route))) ||
+    (method === 'PATCH' && /^(followups|pipeline|locations)\/\d+$/.test(route));
   if (!readable && !writable) return json({ detail: 'Not found' }, 404);
   if (method !== 'GET' && !writable)
     return json({ detail: 'Method not allowed' }, 405);
@@ -103,12 +116,24 @@ export async function proxyConsole(
     return json({ detail: 'Workspace connection needs attention.' }, 503);
   const upstream = new URL(`/api/console/${route}`, base);
   const query = new URL(request.url).searchParams;
-  for (const key of ['limit', 'offset', 'before', 'after']) {
+  for (const key of ['limit', 'offset', 'before', 'after', 'location_id']) {
     const v = query.get(key);
     if (v !== null) {
       if (!/^\d+$/.test(v)) return json({ detail: 'Invalid request' }, 400);
       upstream.searchParams.set(key, v);
     }
+  }
+  const stage = query.get('stage');
+  if (stage && route === 'pipeline') {
+    if (!['new', 'contacted', 'booked', 'won', 'lost'].includes(stage))
+      return json({ detail: 'Invalid stage' }, 400);
+    upstream.searchParams.set('stage', stage);
+  }
+  const unassigned = query.get('unassigned');
+  if (unassigned !== null && route === 'pipeline') {
+    if (!['true', 'false'].includes(unassigned))
+      return json({ detail: 'Invalid location filter' }, 400);
+    upstream.searchParams.set('unassigned', unassigned);
   }
   const status = query.get('status');
   if (status) upstream.searchParams.set('status', status);

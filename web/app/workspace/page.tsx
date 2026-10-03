@@ -47,7 +47,9 @@ async function ProtectedWorkspace() {
         )}
       </main>
     );
-  return <Console demo={false} userName={user.displayName} />;
+  return (
+    <Console initialView="group" demo={false} userName={user.displayName} />
+  );
 }
 export default function Workspace() {
   return <ProtectedWorkspace />;

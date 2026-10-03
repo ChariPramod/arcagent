@@ -14,7 +14,7 @@ from arcagent.persistence.repo import CallRepository
 def main() -> None:
     with session_scope() as session:
         version = session.scalar(text("SELECT version_num FROM alembic_version"))
-        assert version == "d72fc801ab34", "schema revision mismatch"
+        assert version == "f94be013cd56", "schema revision mismatch"
         role = session.execute(
             text(
                 "SELECT rolcreatedb, rolcreaterole, rolsuper FROM pg_roles "

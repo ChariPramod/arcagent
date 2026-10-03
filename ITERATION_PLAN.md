@@ -1,5 +1,14 @@
 # ArcAgent iterative delivery plan
 
+## October 2: dental group enquiry-to-CRM workflow
+
+Selected buyer: a dental group with multiple locations. Selected integration priority: CRM lead delivery and staff follow-up. Implemented a shared group pipeline, location management, revision-safe staff updates, contact correction, business stages, due actions, contact-only export, durable CRM queue, explicit dispatch, destination validation, uncertain-result recovery, and truthful pilot readiness. The fictional demo exercises the workflow without external effects.
+
+Acceptance boundaries: authenticated API and server-derived actor; latest lead per enquiry; concurrent edits and failed commits; duplicate delivery intents; public destination DNS and TLS; provider rejections versus unknown acceptance; client timeouts; CSV formula injection; configuration distinct from observed live validation. New integration transports are mocked in tests. No real patient messages or CRM deliveries are part of this release verification.
+
+Next iteration after buyer activation: verify an owner-controlled receiver, record controlled end-to-end evidence, implement reconciliation based on actual operator needs, and then evaluate permission boundaries and native follow-up tasks. Do not add unrelated connectors before the first accepted workflow. Activation and commercial acceptance are detailed in [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md), [INTEGRATIONS_SETUP.md](INTEGRATIONS_SETUP.md), and [COMMERCIAL_PILOT_PLAN.md](COMMERCIAL_PILOT_PLAN.md).
+
+
 ## September 22: native auth, transfer evidence, and cloud staging
 
 Implemented standards-based native OIDC authentication for the Vercel website, with Google selected by the owner, encrypted short-lived cookies, issuer/client-bound identity, explicit access approval, same-origin logout, and invalid-token regression tests. Preserved Sites identity separately. Implemented durable transfer intent, signed result/progress callbacks, no-answer/unbridged recovery, uncertain-request handling, finalization protection, transfer evidence in the console, and a dry-run-first reconciliation command. Added PostgreSQL migration and deployment source allowlisting.
